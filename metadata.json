@@ -1,0 +1,10 @@
+{
+  "name": "Remix Korg Oriental Commander",
+  "description": "Professional Web MIDI controller for KORG keyboards: Oriental quarter-tone scale tuning (تشريق المقامات), sound and program bank selection (أصوات), and rhythm arranger management (واقعات وإيقاعات).",
+  "requestFramePermissions": [
+    "midi"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
