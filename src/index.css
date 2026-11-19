@@ -296,3 +296,14 @@ header button {
     transform: none;
   }
 }
+header {
+  padding-top: 6px !important;
+  padding-bottom: 4px !important;
+}
+
+header button {
+  min-height: 28px !important;
+  padding: 3px 10px !important;
+  font-size: 11px !important;
+  touch-action: manipulation !important;
+}
