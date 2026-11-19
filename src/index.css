@@ -33,6 +33,16 @@
 .active-press:active {
   transform: scale(0.96) translateY(1px);
   filter: brightness(1.12);
+}header {
+  padding-top: 14px !important;
+  padding-bottom: 10px !important;
+}
+
+header button {
+  min-height: 38px !important;
+  padding: 6px 14px !important;
+  font-size: 13px !important;
+  touch-action: manipulation !important;
 }
 
 /* Smooth touch scroll performance on Stage panels */
