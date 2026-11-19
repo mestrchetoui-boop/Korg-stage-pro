@@ -20,8 +20,7 @@ jobs:
       - name: Install dependencies and build web app
         run: |
           npm install --legacy-peer-deps
-          git clone https://github.com /tmp/webmidi-plugin
-          npm install @capacitor/ios /tmp/webmidi-plugin --legacy-peer-deps
+          npm install @capacitor/ios capacitor-musetrainer-midi --legacy-peer-deps
           npm run build
 
       - name: Add iOS platform and sync
