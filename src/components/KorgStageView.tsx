@@ -2923,12 +2923,12 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         +
                       </button>
                     </div>
-                  </div>
+              
 
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-neutral-300 font-bold">
-                        {isAr ? 'رقم البيرفورمانس (1 – 32):' : 'Performance Number (1 – 32):'}
+                        {isAr ? 'رقم البيرفورمانس (1 – 40):' : 'Performance Number (1 – 32):'}
                       </label>
                       <span dir="ltr" className="font-mono text-[11px] font-bold text-slate-400">
                         {keyboardMode === 'kronos'
@@ -2947,7 +2947,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       <input
                         type="number"
                         min={1}
-                        max={32}
+                        max={40}
                         value={perfNum}
                         onChange={(e) => updatePerformanceFields(bankNum, clampPerfNumber(e.target.value, 1))}
                         className="flex-1 h-11 bg-[#0B1120] text-[#FFB703] font-mono font-black text-base text-center rounded-xl border border-[#1E293B] focus:outline-none focus:border-[#FFB703]"
@@ -3298,7 +3298,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                 })()
               )}
 
-              {editingPad.type === 'style' && (
+              
                 <div>
                   <label className="text-neutral-300 block mb-1.5">
                     {isAr ? 'لون الزر:' : 'Button Color:'}
@@ -3316,7 +3316,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     ))}
                   </div>
                 </div>
-              )}
+              
             </div>
 
             <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#1E293B]">
