@@ -53,7 +53,7 @@ export const ProActivationModal: React.FC<ProActivationModalProps> = ({
     }
   };
 
-  const whatsappHref = 'https://wa.me';
+  const whatsappHref = 'https://wa.me/21653291487';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
