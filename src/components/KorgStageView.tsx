@@ -3007,7 +3007,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                   </div>
                 </div>
               ) : (
-                (() => {
+                  {(() => {
                   const styleMode: 'pc_only' | 'bank_pc' =
                     editingPad.messageType === 'pc_only' ? 'pc_only' : 'bank_pc';
                   const safeMsb = clampMidi(editingPad.msb, 0);
@@ -3316,7 +3316,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     ))}
                   </div>
                 </div>
-                      })() 
+                      })()} 
             </div>
 
             <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#1E293B]">
