@@ -3316,7 +3316,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     ))}
                   </div>
                 </div>
-                      })()} 
+                      
             </div>
 
             <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#1E293B]">
