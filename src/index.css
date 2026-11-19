@@ -306,4 +306,15 @@ header button {
   padding: 3px 10px !important;
   font-size: 11px !important;
   touch-action: manipulation !important;
+}/* إظهار اسم الصوت والإيقاع فقط بخط كبير وواضح */
+button span + span,
+button div > span:nth-child(2) {
+  display: none !important;
+}
+
+button span:first-child {
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.15 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8) !important;
 }
