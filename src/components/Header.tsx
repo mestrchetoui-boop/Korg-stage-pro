@@ -252,12 +252,8 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Start: Brand Title + Signature */}
         <div className="flex items-center gap-2 shrink-0 min-w-0">
           <div className="flex flex-col leading-none">
-            <h1 className="text-[12px] sm:text-sm md:text-[15px] font-black tracking-tight text-white whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)]">
-              Korg <span className="text-[#FFF08A]">&amp;</span> Yamaha{' '}
-              <span className="bg-gradient-to-b from-[#FEF9C3] via-[#FACC15] to-[#B45309] bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(250,204,21,0.45)]">
-                Pro
-              </span>
-            </h1>
+          
+            
             <button
               type="button"
               onClick={onSignatureTap}
