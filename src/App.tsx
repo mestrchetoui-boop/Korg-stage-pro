@@ -32,6 +32,11 @@ import { midiEngine } from './services/midiEngine';
 import { audioEngine } from './services/audioEngine';
 import { isProActivated } from './services/licenseService';
 import { KeyboardEngineMode, KEYBOARD_MODE_STORAGE_KEY } from './services/korgExtraMidi';
+import {
+  YamahaModelId,
+  YAMAHA_MODEL_STORAGE_KEY,
+  getYamahaModelSpec,
+} from './services/yamahaMidi';
 import { ShieldAlert, Cpu } from 'lucide-react';
 
 export default function App() {
@@ -95,6 +100,15 @@ export default function App() {
       return 'pa_series';
     }
   });
+  const [yamahaModel, setYamahaModel] = useState<YamahaModelId>(() => {
+    try {
+      const saved = localStorage.getItem(YAMAHA_MODEL_STORAGE_KEY);
+      if (saved === 'psr_a5000' || saved === 'genos' || saved === 'psr_sx' || saved === 'psr_or700_a3000') {
+        return saved;
+      }
+    } catch {}
+    return 'psr_a5000';
+  });
 
   // Always start in Equal Temperament (0 cents) on open without sending any SysEx automatically
   const [tunings, setTunings] = useState<Record<NoteName, NoteTuning>>(() => {
@@ -142,6 +156,10 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem(KEYBOARD_MODE_STORAGE_KEY, keyboardMode); } catch {}
   }, [keyboardMode]);
+
+  useEffect(() => {
+    try { localStorage.setItem(YAMAHA_MODEL_STORAGE_KEY, yamahaModel); } catch {}
+  }, [yamahaModel]);
 
   // Sync browser Fullscreen state
   useEffect(() => {
@@ -301,7 +319,7 @@ export default function App() {
           e.preventDefault();
         }
       }}
-      className="min-h-[100dvh] overscroll-none bg-[#070B14] text-[#F0F6FC] flex flex-col font-sans selection:bg-[#38BDF8]/30 selection:text-sky-100"
+      className="min-h-[100dvh] overscroll-none bg-[#030508] text-[#F8FAFC] flex flex-col font-sans selection:bg-[#FACC15]/30 selection:text-amber-100"
     >
       <div className="flex-1 flex flex-col ui-brightness-target">
       
@@ -323,24 +341,30 @@ export default function App() {
         onSelectBrand={setActiveBrand}
         keyboardMode={keyboardMode}
         onChangeKeyboardMode={setKeyboardMode}
+        yamahaModel={yamahaModel}
+        onChangeYamahaModel={setYamahaModel}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
       />
 
       {/* Slim Pro Studio Hardware Status Strip */}
-      <section className={`bg-[#070B14] border-b ${activeTheme.panelBorder} px-3 sm:px-5 py-1`}>
+      <section className="bg-[#030508]/95 backdrop-blur-md border-b-[1.5px] border-white/15 px-3 sm:px-5 py-1">
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
           
           {/* Active Model & Scale */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-neutral-300 font-mono">
               <Cpu className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
-              <span className="font-bold text-[#F0F6FC] leading-tight">{currentModel.name}</span>
+              <span className="font-bold text-[#F8FAFC] leading-tight">
+                {activeBrand === 'yamaha'
+                  ? getYamahaModelSpec(yamahaModel).label
+                  : currentModel.name}
+              </span>
             </div>
-            <span className="text-[#1E293B] hidden sm:inline">|</span>
+            <span className="text-[#1F2937] hidden sm:inline">|</span>
             <div className="flex items-center gap-1.5">
               <span className="text-neutral-500">{isAr ? 'التشريق:' : 'Scale:'}</span>
-              <span className="font-mono font-bold text-[#FFB703]">
+              <span className="font-mono font-bold text-[#FDE047]">
                 {activeQuarterNotes.length > 0
                   ? `${activeQuarterNotes.map(n => NOTE_ARABIC_NAMES[n].ar).join(' · ')} (-50¢)`
                   : (isAr ? 'طبيعي (0¢)' : 'Natural (0¢)')}
@@ -351,14 +375,20 @@ export default function App() {
           {/* Quick Arranger & Midi Connection State */}
           <div className="flex items-center gap-3 text-neutral-400 font-mono text-[11px]">
             <span>
-              {isAr ? 'العزف:' : 'Upper 1:'} <strong className="text-[#F0F6FC]">Ch {channels.upper1}</strong>
+              {isAr ? 'العزف:' : 'Upper 1:'} <strong className="text-[#F8FAFC]">Ch {channels.upper1}</strong>
             </span>
             <span>
-              {isAr ? 'الإيقاع:' : 'Arr:'} <strong className="text-[#F0F6FC]">Ch {channels.arranger}</strong>
+              {isAr ? 'الإيقاع:' : 'Arr:'} <strong className="text-[#F8FAFC]">Ch {channels.arranger}</strong>
             </span>
             <span className={`hidden sm:inline-flex items-center gap-1 font-bold ${isMidiConnected ? 'text-emerald-400' : 'text-neutral-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isMidiConnected ? 'bg-emerald-400' : 'bg-neutral-500'}`} />
-              <span>{isMidiConnected ? 'KORG ONLINE' : 'AUDIO SYNTH'}</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${isMidiConnected ? 'bg-emerald-400 shadow-[0_0_6px_#10B981]' : 'bg-neutral-500'}`} />
+              <span>
+                {isMidiConnected
+                  ? activeBrand === 'yamaha'
+                    ? 'YAMAHA ONLINE'
+                    : 'KORG ONLINE'
+                  : 'AUDIO SYNTH'}
+              </span>
             </span>
           </div>
 
@@ -376,6 +406,8 @@ export default function App() {
             lang={lang}
             uiSettings={uiSettings}
             keyboardMode={keyboardMode}
+            activeBrand={activeBrand}
+            yamahaModel={yamahaModel}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
           />
@@ -388,6 +420,8 @@ export default function App() {
             isPro={isPro}
             onRequirePro={openProModal}
             lang={lang}
+            activeBrand={activeBrand}
+            yamahaModel={yamahaModel}
           />
         )}
 
@@ -413,12 +447,16 @@ export default function App() {
             isPro={isPro}
             onRequirePro={openProModal}
             lang={lang}
+            activeBrand={activeBrand}
+            yamahaModel={yamahaModel}
           />
         )}
 
         {activeTab === 'styles' && (
           <StyleSection
             lang={lang}
+            activeBrand={activeBrand}
+            yamahaModel={yamahaModel}
           />
         )}
 
@@ -436,6 +474,8 @@ export default function App() {
             onPadsImported={() => setRestoreRevision(r => r + 1)}
             onGoToStage={() => setActiveTab('stage')}
             lang={lang}
+            activeBrand={activeBrand}
+            yamahaModel={yamahaModel}
           />
         )}
 
@@ -468,12 +508,14 @@ export default function App() {
 
       {/* Subtle Hardware Footer (hidden in fullscreen Stage mode for clean screen lock) */}
       {!(isFullscreen && activeTab === 'stage') && (
-        <footer className={`border-t ${activeTheme.panelBorder} bg-[#070B14] py-4 px-4 sm:px-6 mt-auto`}>
+        <footer className="border-t-[1.5px] border-white/15 bg-[#030508] py-4 px-4 sm:px-6 mt-auto">
           <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-neutral-500">
             <div>
-              <span className="font-bold text-neutral-300">KORG Oriental Commander</span>
+              <span className="font-bold text-[#FFF08A]">Korg &amp; Yamaha Pro</span>
+              <span className="mx-1.5 text-neutral-600">·</span>
+              <span className="font-black bg-gradient-to-r from-[#FFF08A] via-[#FACC15] to-[#B45309] bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(250,204,21,0.45)]">Wael Chetoui</span>
               <span className="mx-2">·</span>
-              <span>{isAr ? 'كلافيي الأورج الاحترافي والتحكم في الأصوات والإيقاعات' : 'KORG Organ Keyboard, Sounds & Arranger Controller'}</span>
+              <span>{isAr ? 'التحكم الاحترافي في أورجات KORG و Yamaha' : 'Pro Workstation Controller for KORG & Yamaha'}</span>
             </div>
             <div className="flex items-center gap-4">
               <button

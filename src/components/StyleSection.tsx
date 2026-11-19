@@ -3,13 +3,26 @@ import { KorgStyle, StyleVariation, StyleFill, StyleIntro, StyleEnding } from '.
 import { KORG_STYLE_LIBRARY } from '../data/korgPresets';
 import { midiEngine } from '../services/midiEngine';
 import { audioEngine } from '../services/audioEngine';
+import {
+  sendYamahaStyleStartStop,
+  sendYamahaStyleControl,
+  sendYamahaStyleSelect,
+  YamahaModelId,
+  getYamahaModelSpec,
+} from '../services/yamahaMidi';
 import { Play, Square, FastForward, Rewind, Radio, Volume2, Sparkles, Sliders } from 'lucide-react';
 
 interface StyleSectionProps {
   lang: 'ar' | 'en';
+  activeBrand?: 'korg' | 'yamaha';
+  yamahaModel?: YamahaModelId;
 }
 
-export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
+export const StyleSection: React.FC<StyleSectionProps> = ({
+  lang,
+  activeBrand = 'korg',
+  yamahaModel = 'psr_a5000',
+}) => {
   const isAr = lang === 'ar';
 
   const [selectedStyle, setSelectedStyle] = useState<KorgStyle>(() => {
@@ -87,7 +100,11 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
       // STOP
       setIsPlaying(false);
       audioEngine.stopRhythm();
-      midiEngine.sendArrangerCommand('stop');
+      if (activeBrand === 'yamaha') {
+        sendYamahaStyleStartStop('stop', yamahaModel);
+      } else {
+        midiEngine.sendArrangerCommand('stop');
+      }
       showToast(isAr ? 'إيقاف الإيقاع (Stop)' : 'Arranger Stopped');
     } else {
       // START
@@ -95,7 +112,11 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
       if (audioPreviewActive) {
         audioEngine.startRhythm(selectedStyle, bpm);
       }
-      midiEngine.sendArrangerCommand('start');
+      if (activeBrand === 'yamaha') {
+        sendYamahaStyleStartStop('start', yamahaModel);
+      } else {
+        midiEngine.sendArrangerCommand('start');
+      }
       showToast(isAr ? `تشغيل الإيقاع: ${selectedStyle.nameAr}` : `Playing: ${selectedStyle.nameEn}`);
     }
   };
@@ -103,7 +124,11 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
   const handleSelectStyle = (style: KorgStyle) => {
     setSelectedStyle(style);
     setBpm(style.bpm);
-    midiEngine.sendStyleSelect(style.msb, style.lsb, style.pc, style.nameAr);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleSelect(style.msb, style.lsb, style.pc, style.nameEn, yamahaModel);
+    } else {
+      midiEngine.sendStyleSelect(style.msb, style.lsb, style.pc, style.nameAr);
+    }
 
     if (isPlaying && audioPreviewActive) {
       audioEngine.startRhythm(style, style.bpm);
@@ -113,28 +138,46 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
 
   const handleVariationChange = (varNum: StyleVariation) => {
     setActiveVariation(varNum);
-    midiEngine.sendStyleElement('variation', varNum);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleControl('variation', varNum, yamahaModel);
+      showToast(`Yamaha Main ${['A', 'B', 'C', 'D'][varNum - 1]}`);
+    } else {
+      midiEngine.sendStyleElement('variation', varNum);
+      showToast(isAr ? `تنويع الإيقاع Variation ${varNum}` : `Variation ${varNum}`);
+    }
     audioEngine.toggleVariation();
-    showToast(isAr ? `تنويع الإيقاع Variation ${varNum}` : `Variation ${varNum}`);
   };
 
   const handleFillTrigger = (fillNum: StyleFill) => {
     setActiveFill(fillNum);
-    midiEngine.sendStyleElement('fill', fillNum);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleControl('fill', fillNum, yamahaModel);
+      showToast(`Yamaha Fill-In ${['A', 'B', 'C', 'D'][fillNum - 1] || fillNum}`);
+    } else {
+      midiEngine.sendStyleElement('fill', fillNum);
+      showToast(isAr ? `قفلة إيقاعية Fill ${fillNum}` : `Fill In ${fillNum}`);
+    }
     audioEngine.triggerFill();
-    showToast(isAr ? `قفلة إيقاعية Fill ${fillNum}` : `Fill In ${fillNum}`);
     setTimeout(() => setActiveFill(null), 1500);
   };
 
   const handleBreakTrigger = () => {
-    midiEngine.sendStyleElement('break', 1);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleControl('break', 1, yamahaModel);
+    } else {
+      midiEngine.sendStyleElement('break', 1);
+    }
     audioEngine.triggerFill();
     showToast(isAr ? 'سكتة / كسرة Break' : 'Break Triggered');
   };
 
   const handleIntroTrigger = (introNum: StyleIntro) => {
     setActiveIntro(introNum);
-    midiEngine.sendStyleElement('intro', introNum);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleControl('intro', introNum, yamahaModel);
+    } else {
+      midiEngine.sendStyleElement('intro', introNum);
+    }
     if (!isPlaying) {
       handleTogglePlay();
     }
@@ -144,7 +187,11 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
 
   const handleEndingTrigger = (endNum: StyleEnding) => {
     setActiveEnding(endNum);
-    midiEngine.sendStyleElement('ending', endNum);
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleControl('ending', endNum, yamahaModel);
+    } else {
+      midiEngine.sendStyleElement('ending', endNum);
+    }
     showToast(isAr ? `خاتمة Ending ${endNum}` : `Ending ${endNum}`);
     setTimeout(() => {
       setActiveEnding(null);
@@ -192,24 +239,52 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
   return (
     <div className="space-y-6">
 
-      {/* Main KORG Arranger Physical Hardware Bar */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 sm:p-6 shadow-2xl space-y-5">
+      {/* Main Physical Arranger Hardware Console */}
+      <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-5">
         
         {/* Upper Arranger Status & Controls */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-neutral-800">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/15">
           
-          <div className="flex items-center gap-4">
-            {/* Illuminated Big START / STOP Button */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Luminous Ruby-Red Crystal START / STOP Button */}
             <button
               onClick={handleTogglePlay}
-              className={`flex items-center gap-2.5 px-6 py-4 rounded-xl font-black text-sm tracking-wide transition-all shadow-lg active:scale-95 ${
+              className={`flex items-center gap-2.5 px-6 py-4 rounded-xl font-black text-sm tracking-wide active-press border-[1.5px] text-white ${
                 isPlaying
-                  ? 'bg-red-500 hover:bg-red-600 text-white led-glow-red'
-                  : 'bg-emerald-500 hover:bg-emerald-600 text-neutral-950 led-glow-emerald'
+                  ? 'crystal-ruby-jewel-active animate-pulse'
+                  : 'crystal-ruby-jewel'
               }`}
             >
+              <span className={`w-2 h-2 rounded-full ${isPlaying ? 'bg-white shadow-[0_0_8px_#fff]' : 'bg-rose-200/80'}`} />
               {isPlaying ? <Square className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
               <span>{isPlaying ? (isAr ? 'إيقاف (STOP)' : 'STOP') : (isAr ? 'تشغيل (START)' : 'START')}</span>
+            </button>
+
+            {/* Emerald Crystal SYNC START Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isSynchroStart;
+                setIsSynchroStart(next);
+                if (activeBrand === 'yamaha') {
+                  showToast(
+                    next
+                      ? (isAr ? `تفعيل تزامن البداية (Sync Start · ${getYamahaModelSpec(yamahaModel).shortLabel})` : 'Yamaha Sync Start Armed')
+                      : (isAr ? 'إلغاء Sync Start' : 'Sync Start Disarmed')
+                  );
+                } else {
+                  midiEngine.sendArrangerCommand('synchro_start');
+                  showToast(next ? (isAr ? 'تفعيل Sync Start (تزامن البداية)' : 'Sync Start Armed') : (isAr ? 'تم إرسال Sync Start' : 'Sync Start Toggled'));
+                }
+              }}
+              className={`flex items-center gap-2 px-4 py-3.5 rounded-xl font-black text-xs tracking-wide active-press border-[1.5px] ${
+                isSynchroStart
+                  ? 'crystal-emerald-jewel-active text-[#030508]'
+                  : 'crystal-emerald-jewel text-emerald-100'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isSynchroStart ? 'bg-[#030508] shadow-[0_0_6px_#030508]' : 'bg-emerald-300/75'}`} />
+              <span>SYNC START</span>
             </button>
 
             <div>
@@ -217,7 +292,7 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                 <span className="text-base sm:text-lg font-bold text-white">
                   {isAr ? selectedStyle.nameAr : selectedStyle.nameEn}
                 </span>
-                <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono">
+                <span className="text-xs px-2 py-0.5 rounded bg-[#FACC15]/15 border border-[#FACC15]/40 text-[#FFF08A] font-mono">
                   {selectedStyle.timeSignature}
                 </span>
               </div>
@@ -228,10 +303,10 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
           </div>
 
           {/* Tempo BPM & Tap Tempo Module */}
-          <div className="flex items-center gap-3 bg-neutral-950 p-2.5 rounded-xl border border-neutral-800 self-start lg:self-auto">
+          <div className="flex items-center gap-3 bg-[#030508] p-2.5 rounded-xl border-[1.5px] border-white/15 self-start lg:self-auto">
             <div className="text-center px-2">
               <span className="text-[10px] text-neutral-400 uppercase tracking-wider block font-mono">TEMPO</span>
-              <span className="text-2xl font-black font-mono text-amber-400 tabular-nums">
+              <span className="text-2xl font-black font-mono text-[#FACC15] tabular-nums">
                 {bpm}
               </span>
               <span className="text-[9px] text-neutral-500 block">BPM</span>
@@ -307,10 +382,12 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
         {/* Variations 1-4, Fills 1-3, Intro 1-3, Ending 1-3 Console */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           
-          {/* Variations 1 - 4 */}
-          <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/90 space-y-2">
-            <span className="text-[11px] font-mono font-bold text-neutral-400 block text-center uppercase tracking-wider">
-              {isAr ? 'تنويعات الإيقاع (Variations)' : 'Variations'}
+          {/* Variations 1 - 4 / Yamaha Main A - D (Sapphire Crystal Glow) */}
+          <div className="oled-subpanel p-3 rounded-xl border-[1.5px] border-white/15 space-y-2">
+            <span className="text-[11px] font-mono font-bold text-sky-300/80 block text-center uppercase tracking-wider">
+              {activeBrand === 'yamaha'
+                ? (isAr ? `أقسام ياماها (${getYamahaModelSpec(yamahaModel).shortLabel})` : 'Main A – D')
+                : (isAr ? 'تنويعات الإيقاع (Variations)' : 'Variations')}
             </span>
             <div className="grid grid-cols-4 gap-1.5">
               {([1, 2, 3, 4] as const).map((v) => {
@@ -319,23 +396,23 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                   <button
                     key={v}
                     onClick={() => handleVariationChange(v)}
-                    className={`py-3 rounded font-mono font-black text-xs transition-all active:scale-95 flex flex-col items-center gap-1 ${
+                    className={`py-3 rounded-lg font-mono font-black text-xs active-press flex flex-col items-center gap-1 border-[1.5px] ${
                       isActive
-                        ? 'bg-amber-500 text-neutral-950 led-glow-amber'
-                        : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800 hover:text-white border border-neutral-800'
+                        ? 'crystal-sapphire-jewel-active text-[#030508]'
+                        : 'crystal-sapphire-jewel text-sky-100'
                     }`}
                   >
-                    <span>V{v}</span>
-                    <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-neutral-950' : 'bg-neutral-700'}`} />
+                    <span>{activeBrand === 'yamaha' ? ['A', 'B', 'C', 'D'][v - 1] : `V${v}`}</span>
+                    <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-[#030508] shadow-[0_0_6px_#030508]' : 'bg-sky-300/50'}`} />
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Fills 1 - 3 & Break */}
-          <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/90 space-y-2">
-            <span className="text-[11px] font-mono font-bold text-neutral-400 block text-center uppercase tracking-wider">
+          {/* Fills 1 - 3 & Break (Sapphire & Cyan Crystal Glow) */}
+          <div className="oled-subpanel p-3 rounded-xl border-[1.5px] border-white/15 space-y-2">
+            <span className="text-[11px] font-mono font-bold text-cyan-300/80 block text-center uppercase tracking-wider">
               {isAr ? 'القفلات والسكتات (Fills & Break)' : 'Fills & Break'}
             </span>
             <div className="grid grid-cols-4 gap-1.5">
@@ -343,10 +420,10 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                 <button
                   key={f}
                   onClick={() => handleFillTrigger(f)}
-                  className={`py-3 rounded font-mono font-bold text-xs transition-all active:scale-95 ${
+                  className={`py-3 rounded-lg font-mono font-black text-xs active-press border-[1.5px] ${
                     activeFill === f
-                      ? 'bg-cyan-500 text-neutral-950 led-glow-cyan'
-                      : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800 hover:text-white border border-neutral-800'
+                      ? 'crystal-sapphire-jewel-active text-[#030508]'
+                      : 'crystal-sapphire-jewel text-sky-100'
                   }`}
                 >
                   F{f}
@@ -354,16 +431,16 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
               ))}
               <button
                 onClick={handleBreakTrigger}
-                className="py-3 rounded font-mono font-bold text-[10px] bg-red-950/70 text-red-200 hover:bg-red-900 border border-red-800/80 transition-all active:scale-95"
+                className="py-3 rounded-lg font-mono font-black text-[10px] crystal-cyan-jewel text-cyan-100 border-[1.5px] active-press"
               >
                 BRK
               </button>
             </div>
           </div>
 
-          {/* Intros 1 - 3 */}
-          <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/90 space-y-2">
-            <span className="text-[11px] font-mono font-bold text-neutral-400 block text-center uppercase tracking-wider">
+          {/* Intros 1 - 3 (Emerald Crystal Glow) */}
+          <div className="oled-subpanel p-3 rounded-xl border-[1.5px] border-white/15 space-y-2">
+            <span className="text-[11px] font-mono font-bold text-emerald-300/80 block text-center uppercase tracking-wider">
               {isAr ? 'المقدمات (Intros)' : 'Intros'}
             </span>
             <div className="grid grid-cols-3 gap-1.5">
@@ -371,10 +448,10 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                 <button
                   key={i}
                   onClick={() => handleIntroTrigger(i)}
-                  className={`py-3 rounded font-mono font-bold text-xs transition-all active:scale-95 ${
+                  className={`py-3 rounded-lg font-mono font-black text-xs active-press border-[1.5px] ${
                     activeIntro === i
-                      ? 'bg-emerald-500 text-neutral-950 led-glow-emerald'
-                      : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800 hover:text-white border border-neutral-800'
+                      ? 'crystal-emerald-jewel-active text-[#030508]'
+                      : 'crystal-emerald-jewel text-emerald-100'
                   }`}
                 >
                   IN{i}
@@ -384,8 +461,8 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
           </div>
 
           {/* Endings 1 - 3 */}
-          <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/90 space-y-2">
-            <span className="text-[11px] font-mono font-bold text-neutral-400 block text-center uppercase tracking-wider">
+          <div className="oled-subpanel p-3 rounded-xl border-[1.5px] border-white/15 space-y-2">
+            <span className="text-[11px] font-mono font-bold text-amber-300/80 block text-center uppercase tracking-wider">
               {isAr ? 'الخاتمات (Endings)' : 'Endings'}
             </span>
             <div className="grid grid-cols-3 gap-1.5">
@@ -393,10 +470,10 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                 <button
                   key={e}
                   onClick={() => handleEndingTrigger(e)}
-                  className={`py-3 rounded font-mono font-bold text-xs transition-all active:scale-95 ${
+                  className={`py-3 rounded-lg font-mono font-black text-xs active-press border-[1.5px] ${
                     activeEnding === e
-                      ? 'bg-amber-600 text-white led-glow-amber'
-                      : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800 hover:text-white border border-neutral-800'
+                      ? 'hardware-keycap-gold-active text-[#030508]'
+                      : 'hardware-keycap-dark text-neutral-200 hover:text-white'
                   }`}
                 >
                   ED{e}
@@ -408,7 +485,7 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
         </div>
 
         {/* 16-Step Real-time Drum Rhythm Sequencer Visualizer */}
-        <div className="bg-neutral-950 p-3.5 rounded-lg border border-neutral-800/80 space-y-2">
+        <div className="bg-[#030508] p-3.5 rounded-xl border-[1.5px] border-white/15 space-y-2">
           <div className="flex items-center justify-between text-xs text-neutral-400 font-mono">
             <span className="text-amber-400 font-bold">
               {isAr ? 'شريط نبضات الإيقاع المباشر (16-Step Grid):' : 'Live 16-Step Beat Tracker:'}
@@ -466,12 +543,12 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
       </div>
 
       {/* Style Browser & Category Selector */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 sm:p-6 shadow-xl space-y-4">
+      <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
         
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Radio className="w-4 h-4 text-amber-400" />
+              <Radio className="w-4 h-4 text-[#FACC15]" />
               <span>{isAr ? 'بنك الإيقاعات العربية والشرقية (Korg Style Library)' : 'KORG Oriental Style Library'}</span>
             </h3>
             <p className="text-xs text-neutral-400 mt-0.5">
@@ -491,10 +568,10 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
               <button
                 key={cat.id}
                 onClick={() => setActiveCategory(cat.id as any)}
-                className={`px-3 py-1.5 rounded-md transition-all whitespace-nowrap shrink-0 ${
+                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap shrink-0 border-[1.5px] ${
                   activeCategory === cat.id
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
-                    : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                    ? 'bg-[#FACC15]/20 text-[#FFF08A] font-bold border-[#FACC15]/50'
+                    : 'text-neutral-400 hover:text-white border-transparent'
                 }`}
               >
                 {isAr ? cat.ar : cat.en}
@@ -511,18 +588,18 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
               <button
                 key={style.id}
                 onClick={() => handleSelectStyle(style)}
-                className={`p-4 rounded-xl border text-start transition-all flex flex-col justify-between ${
+                className={`p-4 rounded-xl border-[1.5px] text-start transition-all flex flex-col justify-between ${
                   isSelected
-                    ? 'bg-neutral-800 border-amber-500 shadow-md ring-1 ring-amber-500/40'
-                    : 'bg-neutral-950/70 border-neutral-800/80 hover:bg-neutral-800/50 hover:border-neutral-700'
+                    ? 'bg-[#FACC15]/15 border-[#FACC15] shadow-[0_0_20px_rgba(250,204,21,0.28)] ring-1 ring-[#FFF08A]/40'
+                    : 'bg-[#030508]/90 border-white/15 hover:border-white/30'
                 }`}
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className={`font-bold text-sm ${isSelected ? 'text-amber-400' : 'text-neutral-100'}`}>
+                    <span className={`font-bold text-sm ${isSelected ? 'text-[#FFF08A]' : 'text-neutral-100'}`}>
                       {isAr ? style.nameAr : style.nameEn}
                     </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-amber-400">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#030508] border border-white/15 text-[#FACC15]">
                       {style.bpm} BPM
                     </span>
                   </div>
@@ -532,9 +609,9 @@ export const StyleSection: React.FC<StyleSectionProps> = ({ lang }) => {
                   </p>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-neutral-800/60 flex items-center justify-between text-[11px] font-mono text-neutral-400">
+                <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px] font-mono text-neutral-400">
                   <span>{style.timeSignature}</span>
-                  <span className="text-neutral-400">
+                  <span className="text-neutral-300">
                     MSB {style.msb} · PC {style.pc}
                   </span>
                 </div>

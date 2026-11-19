@@ -67,6 +67,9 @@ export interface ExtractedSoundBankEntry {
   lsb: number;
   pc: number;
   isUsedInSet: boolean;
+  hasLinkedSamples?: boolean;
+  linkedKmpCount?: number;
+  linkedPcmCount?: number;
 }
 
 export interface ExtractedStyleEntry {
@@ -116,6 +119,7 @@ export interface ParsedPaSet {
   setName: string;
   totalSizeBytes: number;
   totalFiles: number;
+  ignoredHiddenFilesCount: number;
   stylesCount: number;
   performancesCount: number;
   padsCount: number;
@@ -129,6 +133,22 @@ export interface ParsedPaSet {
   extractedSounds: ExtractedSoundBankEntry[];
   extractedStyles: ExtractedStyleEntry[];
   rawFilesMap: Map<string, Uint8Array>;
+}
+
+/**
+ * Returns true for macOS AppleDouble (._*), __MACOSX folders, .DS_Store, Thumbs.db, and desktop.ini
+ * which otherwise cause Korg Pa "disk/file read error" when copied to USB.
+ */
+export function isHiddenOsMetadataPath(rawPath: string): boolean {
+  const normalized = rawPath.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  for (const part of parts) {
+    if (part === '__MACOSX' || part.startsWith('._')) {
+      return true;
+    }
+  }
+  const base = parts[parts.length - 1] || normalized;
+  return base === '.DS_Store' || base === 'Thumbs.db' || base === 'desktop.ini';
 }
 
 const SYSTEM_NOISE_TOKENS = new Set([
@@ -256,12 +276,21 @@ function inferBankFromFileName(fileName: string, fallbackIdx: number): {
   return { bankType: 'user_sound', userBankIndex: idx, msb: 121, lsb: 63 + idx };
 }
 
-function analyzeRawFilesMap(setName: string, rawFilesMap: Map<string, Uint8Array>): ParsedPaSet {
+function analyzeRawFilesMap(
+  setName: string,
+  rawFilesMap: Map<string, Uint8Array>,
+  initialIgnoredHiddenCount: number = 0
+): ParsedPaSet {
   const assets: ParsedSetAsset[] = [];
   let totalSizeBytes = 0;
+  let ignoredHiddenFilesCount = initialIgnoredHiddenCount;
 
   let index = 0;
   for (const [path, bytes] of rawFilesMap.entries()) {
+    if (isHiddenOsMetadataPath(path)) {
+      ignoredHiddenFilesCount++;
+      continue;
+    }
     const fileName = getFileName(path);
     const kind = classifyAssetKind(path);
     totalSizeBytes += bytes.byteLength;
@@ -390,14 +419,73 @@ function analyzeRawFilesMap(setName: string, rawFilesMap: Map<string, Uint8Array
   // Build extracted sound entries from .PCG banks (or fallback .TXT/.CSV bank lists if uploaded)
   const extractedSounds: ExtractedSoundBankEntry[] = [];
   const soundBankAssets = assets.filter((a) => a.kind === 'sound_bank');
+  const kmpSampleAssets = assets.filter((a) => a.kind === 'multisample');
+  const pcmSampleAssets = assets.filter((a) => a.kind === 'pcm');
 
   soundBankAssets.forEach((bankAsset, bankIdx) => {
     const bankInfo = inferBankFromFileName(bankAsset.fileName, bankIdx);
+    const bankTokens = new Set<string>([
+      stripExtension(bankAsset.fileName).toUpperCase(),
+      ...bankAsset.extractedNames.map((n) => n.toUpperCase()).filter((u) => u.length >= 3),
+    ]);
+    const bankFileUpper = bankAsset.fileName.toUpperCase();
+
+    const matchedKmps = kmpSampleAssets.filter((kmp) => {
+      const kmpStem = stripExtension(kmp.fileName).toUpperCase();
+      if (kmp.usedBy.some((u) => u.toUpperCase() === bankFileUpper)) return true;
+      for (const tok of bankTokens) {
+        if (kmpStem.includes(tok) || (tok.length >= 4 && tok.includes(kmpStem))) return true;
+        if (kmp.extractedNames.some((n) => n.toUpperCase().includes(tok))) return true;
+      }
+      return false;
+    });
+
+    const holderUpperSet = new Set<string>([
+      bankFileUpper,
+      ...matchedKmps.map((m) => m.fileName.toUpperCase()),
+    ]);
+    const kmpTokens = new Set<string>(bankTokens);
+    matchedKmps.forEach((m) => {
+      kmpTokens.add(stripExtension(m.fileName).toUpperCase());
+      m.extractedNames.forEach((n) => {
+        const u = n.toUpperCase();
+        if (u.length >= 3) kmpTokens.add(u);
+      });
+    });
+
+    let matchedPcms = pcmSampleAssets.filter((pcm) => {
+      const pcmStem = stripExtension(pcm.fileName).toUpperCase();
+      if (pcm.usedBy.some((u) => holderUpperSet.has(u.toUpperCase()))) return true;
+      for (const tok of kmpTokens) {
+        if (pcmStem.includes(tok) || (tok.length >= 4 && tok.includes(pcmStem))) return true;
+        if (pcm.extractedNames.some((n) => n.toUpperCase().includes(tok))) return true;
+      }
+      return false;
+    });
+
+    if (matchedPcms.length === 0 && pcmSampleAssets.length > 0 && matchedKmps.length > 0) {
+      matchedPcms = pcmSampleAssets.filter((p) =>
+        /^(RAM|USERPCM|PCM\d*|SAMPLE\d*)$/i.test(stripExtension(p.fileName).toUpperCase())
+      );
+    }
+
+    const bankLinkedKmpCount = matchedKmps.length;
+    const bankLinkedPcmCount = matchedPcms.length;
+
     const candidateNames = bankAsset.extractedNames.length > 0
       ? bankAsset.extractedNames.slice(0, 24)
       : [stripExtension(bankAsset.fileName)];
 
     candidateNames.forEach((name, slotIdx) => {
+      const upperSoundName = name.trim().toUpperCase();
+      const soundDirectKmp =
+        bankLinkedKmpCount > 0 ||
+        kmpSampleAssets.some((k) => stripExtension(k.fileName).toUpperCase().includes(upperSoundName));
+      const soundDirectPcm =
+        bankLinkedPcmCount > 0 ||
+        (upperSoundName.length >= 4 &&
+          pcmSampleAssets.some((p) => stripExtension(p.fileName).toUpperCase().includes(upperSoundName)));
+
       extractedSounds.push({
         id: `ext_snd_${bankIdx}_${slotIdx}`,
         name: name.slice(0, 18),
@@ -408,6 +496,9 @@ function analyzeRawFilesMap(setName: string, rawFilesMap: Map<string, Uint8Array
         lsb: bankInfo.lsb,
         pc: slotIdx % 128,
         isUsedInSet: bankAsset.isUsed,
+        hasLinkedSamples: soundDirectKmp || soundDirectPcm,
+        linkedKmpCount: bankLinkedKmpCount,
+        linkedPcmCount: bankLinkedPcmCount,
       });
     });
   });
@@ -445,6 +536,7 @@ function analyzeRawFilesMap(setName: string, rawFilesMap: Map<string, Uint8Array
     setName: stripExtension(setName).replace(/\.SET$/i, '') || 'KORG_SET',
     totalSizeBytes,
     totalFiles: assets.length,
+    ignoredHiddenFilesCount,
     stylesCount: assets.filter((a) => a.kind === 'style').length,
     performancesCount: assets.filter((a) => a.kind === 'performance').length,
     padsCount: assets.filter((a) => a.kind === 'pad').length,
@@ -464,16 +556,20 @@ function analyzeRawFilesMap(setName: string, rawFilesMap: Map<string, Uint8Array
 export async function analyzeUploadedZip(file: File): Promise<ParsedPaSet> {
   const zip = await JSZip.loadAsync(file);
   const rawFilesMap = new Map<string, Uint8Array>();
+  let ignoredHiddenFilesCount = 0;
 
   const entries = Object.values(zip.files).filter((entry) => !entry.dir);
   for (const entry of entries) {
-    // Skip macOS metadata clutter
-    if (entry.name.includes('__MACOSX/') || entry.name.endsWith('.DS_Store')) continue;
+    // Strip macOS / AppleDouble metadata clutter (._*, __MACOSX, .DS_Store, Thumbs.db)
+    if (isHiddenOsMetadataPath(entry.name)) {
+      ignoredHiddenFilesCount++;
+      continue;
+    }
     const data = await entry.async('uint8array');
     rawFilesMap.set(entry.name, data);
   }
 
-  return analyzeRawFilesMap(file.name, rawFilesMap);
+  return analyzeRawFilesMap(file.name, rawFilesMap, ignoredHiddenFilesCount);
 }
 
 function normalizeRelativeSetPath(rawPath: string, fallbackKind: SetAssetKind): string {
@@ -512,14 +608,11 @@ export async function analyzeUploadedEntries(
 ): Promise<ParsedPaSet> {
   const rawFilesMap = new Map<string, Uint8Array>();
 
-  // Skip OS clutter files
+  // Skip macOS / AppleDouble (._*) & Windows OS clutter files
   const validEntries = entries.filter(
-    (e) =>
-      !e.relativePath.includes('__MACOSX/') &&
-      !e.file.name.startsWith('._') &&
-      e.file.name !== '.DS_Store' &&
-      e.file.name !== 'Thumbs.db'
+    (e) => !isHiddenOsMetadataPath(e.relativePath) && !isHiddenOsMetadataPath(e.file.name)
   );
+  const ignoredHiddenFilesCount = entries.length - validEntries.length;
 
   // If user uploaded a single .zip inside folder/drop, parse it directly as archive
   if (validEntries.length === 1 && /\.zip$/i.test(validEntries[0].file.name)) {
@@ -535,7 +628,7 @@ export async function analyzeUploadedEntries(
 
   const fallbackName = validEntries.length === 1 ? stripExtension(validEntries[0].file.name) : 'CUSTOM_KORG_SET';
   const setName = inferSetNameFromPaths(Array.from(rawFilesMap.keys()), fallbackName);
-  return analyzeRawFilesMap(setName, rawFilesMap);
+  return analyzeRawFilesMap(setName, rawFilesMap, ignoredHiddenFilesCount);
 }
 
 export async function analyzeUploadedFiles(fileList: FileList | File[]): Promise<ParsedPaSet> {
@@ -556,7 +649,7 @@ export async function buildCleanSetZip(
   let savedBytes = 0;
 
   for (const [path, data] of parsedSet.rawFilesMap.entries()) {
-    if (excludedPaths.has(path)) {
+    if (isHiddenOsMetadataPath(path) || excludedPaths.has(path)) {
       removedCount++;
       savedBytes += data.byteLength;
       continue;
@@ -1024,6 +1117,7 @@ export async function exportConvertedArchive(
 
   if (parsedSet) {
     for (const [path, data] of parsedSet.rawFilesMap.entries()) {
+      if (isHiddenOsMetadataPath(path)) continue;
       const innerPath = toCleanSetRelativePath(path);
       const ext = getExtUpper(path);
       if (PATCHABLE_EXTENSIONS.has(ext)) {
@@ -1130,6 +1224,7 @@ export async function exportSelectedSoundsPackage(
 
     const bankTokens = new Set<string>(selectedNameTokens);
     for (const pcgAsset of matchedPcgAssets) {
+      if (isHiddenOsMetadataPath(pcgAsset.path)) continue;
       bankTokens.add(stripExtension(pcgAsset.fileName).toUpperCase());
       pcgAsset.extractedNames.forEach((tok) => {
         const u = tok.trim().toUpperCase();
@@ -1148,7 +1243,7 @@ export async function exportSelectedSoundsPackage(
 
     // 2. Collect linked .KMP / .KSF / .PCM sample assets referenced by the selected sound(s) / .PCG
     const allSampleAssets = parsedSet.assets.filter(
-      (a) => a.kind === 'multisample' || a.kind === 'pcm'
+      (a) => !isHiddenOsMetadataPath(a.path) && (a.kind === 'multisample' || a.kind === 'pcm')
     );
     const matchedSampleAssets = allSampleAssets.filter((asset) => {
       const stemUpper = stripExtension(asset.fileName).toUpperCase();
@@ -1173,6 +1268,7 @@ export async function exportSelectedSoundsPackage(
           ];
 
     for (const sampleAsset of finalSamples) {
+      if (isHiddenOsMetadataPath(sampleAsset.path)) continue;
       const rawBytes = parsedSet.rawFilesMap.get(sampleAsset.path);
       if (!rawBytes) continue;
       const folder = sampleAsset.kind === 'pcm' ? 'PCM' : 'MULTISMP';
@@ -1221,10 +1317,11 @@ export async function exportSelectedSoundsPackage(
   zip.file(`${setFolder}/SELECTED_SOUNDS.csv`, csvLines.join('\n'));
   zip.file(`${setFolder}/LOAD_INSTRUCTIONS.txt`, instructions);
 
-  // Fast STORE compression for mobile speed
+  // Compressed DEFLATE archive (USB-ready & stripped of ._* metadata)
   const blob = await zip.generateAsync({
     type: 'blob',
-    compression: 'STORE',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
   });
 
   return {
@@ -1395,13 +1492,14 @@ export async function buildCombinedSetZip(options: CombinedSetOptions): Promise<
   const manifestLines: string[] = [
     `KORG PA MOBILE SET COMBINER MANIFEST`,
     `Output SET Folder: ${rootFolder}`,
-    `Compression: STORE (Fast Mobile USB Ready)`,
+    `Compression: DEFLATE Level 6 (Clean USB Ready · ._ Stripped)`,
     `Generated: ${new Date().toISOString()}`,
     '',
     '--- SOUND BANKS (.PCG) ---',
   ];
 
   const writeZipFile = (relPath: string, data: Uint8Array) => {
+    if (isHiddenOsMetadataPath(relPath)) return;
     zip.file(`${rootFolder}/${relPath}`, data);
     totalFilesCount++;
     totalBytes += data.byteLength;
@@ -1410,10 +1508,13 @@ export async function buildCombinedSetZip(options: CombinedSetOptions): Promise<
   // 1. Collect & sequentially renumber selected .PCG Sound Banks (Set A then Set B)
   const addSoundBanksFromSet = (tag: 'SET_A' | 'SET_B', set: ParsedPaSet | null, selectedPaths: Set<string>) => {
     if (!set) return;
-    const assets = set.assets.filter((a) => a.kind === 'sound_bank' && selectedPaths.has(a.path));
+    const assets = set.assets.filter(
+      (a) => !isHiddenOsMetadataPath(a.path) && a.kind === 'sound_bank' && selectedPaths.has(a.path)
+    );
     assets.sort((a, b) => a.fileName.localeCompare(b.fileName, undefined, { numeric: true }));
 
     for (const asset of assets) {
+      if (isHiddenOsMetadataPath(asset.path)) continue;
       const data = set.rawFilesMap.get(asset.path);
       if (!data) continue;
       let targetFileName: string;
@@ -1438,10 +1539,13 @@ export async function buildCombinedSetZip(options: CombinedSetOptions): Promise<
   // 2. Collect & sequentially renumber selected .STY Style Banks (Set A then Set B)
   const addStyleBanksFromSet = (tag: 'SET_A' | 'SET_B', set: ParsedPaSet | null, selectedPaths: Set<string>) => {
     if (!set) return;
-    const assets = set.assets.filter((a) => a.kind === 'style' && selectedPaths.has(a.path));
+    const assets = set.assets.filter(
+      (a) => !isHiddenOsMetadataPath(a.path) && a.kind === 'style' && selectedPaths.has(a.path)
+    );
     assets.sort((a, b) => a.fileName.localeCompare(b.fileName, undefined, { numeric: true }));
 
     for (const asset of assets) {
+      if (isHiddenOsMetadataPath(asset.path)) continue;
       const data = set.rawFilesMap.get(asset.path);
       if (!data) continue;
       const targetFileName = `USER${String(styleBankCounter).padStart(2, '0')}.STY`;
@@ -1465,6 +1569,7 @@ export async function buildCombinedSetZip(options: CombinedSetOptions): Promise<
     const addSupportFromSet = (tag: 'A' | 'B', set: ParsedPaSet | null, hasSelected: boolean) => {
       if (!set || !hasSelected) return;
       for (const asset of set.assets) {
+        if (isHiddenOsMetadataPath(asset.path)) continue;
         if (
           asset.kind !== 'pcm' &&
           asset.kind !== 'multisample' &&
@@ -1517,10 +1622,11 @@ export async function buildCombinedSetZip(options: CombinedSetOptions): Promise<
   );
   zip.file(`${rootFolder}/MERGE_MANIFEST.txt`, manifestLines.join('\n'));
 
-  // Fast STORE compression (zero CPU bottleneck on mobile)
+  // Compressed DEFLATE archive (USB-ready & stripped of ._* metadata)
   const blob = await zip.generateAsync({
     type: 'blob',
-    compression: 'STORE',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
   });
 
   return {
@@ -1551,6 +1657,9 @@ export interface ExtractableSetItem {
   lsb: number;
   pc: number;
   isUsedInSet: boolean;
+  hasLinkedSamples: boolean;
+  linkedKmpCount: number;
+  linkedPcmCount: number;
 }
 
 export interface PrunedSoundPackPlan {
@@ -1607,13 +1716,24 @@ export function buildExtractableSetItems(parsedSet: ParsedPaSet | null): Extract
       lsb: snd.lsb,
       pc: snd.pc,
       isUsedInSet: snd.isUsedInSet,
+      hasLinkedSamples: Boolean(snd.hasLinkedSamples),
+      linkedKmpCount: snd.linkedKmpCount ?? 0,
+      linkedPcmCount: snd.linkedPcmCount ?? 0,
     });
   }
 
   const perfAssets = parsedSet.assets.filter((a) => a.kind === 'performance');
+  const kmpAndPcmAssets = parsedSet.assets.filter((a) => a.kind === 'multisample' || a.kind === 'pcm');
   perfAssets.forEach((pa, idx) => {
     const cleanFile = stripExtension(pa.fileName);
     const names = pa.extractedNames.length > 0 ? pa.extractedNames.slice(0, 20) : [cleanFile];
+    const perfKmpCount = kmpAndPcmAssets.filter(
+      (a) => a.kind === 'multisample' && a.usedBy.some((u) => u.toUpperCase() === pa.fileName.toUpperCase())
+    ).length;
+    const perfPcmCount = kmpAndPcmAssets.filter(
+      (a) => a.kind === 'pcm' && a.usedBy.some((u) => u.toUpperCase() === pa.fileName.toUpperCase())
+    ).length;
+
     names.forEach((rawName, j) => {
       const displayName = rawName.slice(0, 22);
       const triplet = pa.referencedTriplets[j] || pa.referencedTriplets[0];
@@ -1632,6 +1752,9 @@ export function buildExtractableSetItems(parsedSet: ParsedPaSet | null): Extract
         lsb,
         pc,
         isUsedInSet: true,
+        hasLinkedSamples: perfKmpCount > 0 || perfPcmCount > 0,
+        linkedKmpCount: perfKmpCount,
+        linkedPcmCount: perfPcmCount,
       });
     });
   });
@@ -1800,6 +1923,7 @@ export async function extractSingleSoundPackZip(
 
   const writePrunedAssets = (assets: ParsedSetAsset[], folderName: 'SOUND' | 'MULTISMP' | 'PCM' | 'PERFORM') => {
     for (const asset of assets) {
+      if (isHiddenOsMetadataPath(asset.path)) continue;
       const rawBytes = parsedSet.rawFilesMap.get(asset.path);
       if (!rawBytes) continue;
       const relPath = `${folderName}/${asset.fileName}`;
@@ -1851,7 +1975,8 @@ export async function extractSingleSoundPackZip(
 
   const blob = await zip.generateAsync({
     type: 'blob',
-    compression: 'STORE',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
   });
 
   return {
@@ -1866,6 +1991,233 @@ export async function extractSingleSoundPackZip(
     patchedCount,
     totalBytes: plan.totalBytes,
     includedPaths,
+  };
+}
+
+export interface RamInspectorReport {
+  ramExpandedMb: number;
+  usedPcmKmpMb: number;
+  unusedPcmKmpMb: number;
+  totalPcmKmpMb: number;
+  freeExpandedMb: number;
+  usedPct: number;
+  unusedPct: number;
+  overLimit: boolean;
+  usedSampleCount: number;
+  unusedSampleCount: number;
+  usedSoundCount: number;
+  unusedSoundCount: number;
+}
+
+/**
+ * Piano Manager style RAM Inspector calculating Used vs Unused/Orphaned PCM/KMP memory
+ * and Sound Bank (.PCG) usage against the target KORG Pa model's RAM capacity.
+ */
+export function inspectRamBreakdown(
+  parsedSet: ParsedPaSet | null,
+  targetModel: KorgPaModelId
+): RamInspectorReport {
+  const ramExpandedMb = PA_MODEL_SPECS[targetModel].maxPcmMb;
+  if (!parsedSet) {
+    return {
+      ramExpandedMb,
+      usedPcmKmpMb: 0,
+      unusedPcmKmpMb: 0,
+      totalPcmKmpMb: 0,
+      freeExpandedMb: ramExpandedMb,
+      usedPct: 0,
+      unusedPct: 0,
+      overLimit: false,
+      usedSampleCount: 0,
+      unusedSampleCount: 0,
+      usedSoundCount: 0,
+      unusedSoundCount: 0,
+    };
+  }
+
+  const sampleAssets = parsedSet.assets.filter(
+    (a) => !isHiddenOsMetadataPath(a.path) && (a.kind === 'pcm' || a.kind === 'multisample')
+  );
+  const usedSamples = sampleAssets.filter((a) => a.isUsed);
+  const unusedSamples = sampleAssets.filter((a) => !a.isUsed);
+
+  const usedBytes = usedSamples.reduce((sum, a) => sum + a.sizeBytes, 0);
+  const unusedBytes = unusedSamples.reduce((sum, a) => sum + a.sizeBytes, 0);
+
+  const usedPcmKmpMb = usedBytes / (1024 * 1024);
+  const unusedPcmKmpMb = unusedBytes / (1024 * 1024);
+  const totalPcmKmpMb = usedPcmKmpMb + unusedPcmKmpMb;
+  const freeExpandedMb = Math.max(0, ramExpandedMb - totalPcmKmpMb);
+  const overLimit = totalPcmKmpMb > ramExpandedMb;
+
+  const scaleDenom = Math.max(ramExpandedMb, totalPcmKmpMb, 0.0001);
+  const usedPct = totalPcmKmpMb > 0 ? Math.min(100, (usedPcmKmpMb / scaleDenom) * 100) : 0;
+  const unusedPct = totalPcmKmpMb > 0 ? Math.min(100 - usedPct, (unusedPcmKmpMb / scaleDenom) * 100) : 0;
+
+  const soundBankAssets = parsedSet.assets.filter(
+    (a) => !isHiddenOsMetadataPath(a.path) && a.kind === 'sound_bank'
+  );
+  const usedSoundCount = soundBankAssets.filter((a) => a.isUsed).length;
+  const unusedSoundCount = soundBankAssets.filter((a) => !a.isUsed).length;
+
+  return {
+    ramExpandedMb,
+    usedPcmKmpMb,
+    unusedPcmKmpMb,
+    totalPcmKmpMb,
+    freeExpandedMb,
+    usedPct,
+    unusedPct,
+    overLimit,
+    usedSampleCount: usedSamples.length,
+    unusedSampleCount: unusedSamples.length,
+    usedSoundCount,
+    unusedSoundCount,
+  };
+}
+
+export type YamahaTargetKey = 'psr_a5000' | 'genos' | 'psr_sx' | 'psr_or700_a3000';
+
+export interface YamahaConvertedArchiveResult {
+  blob: Blob;
+  filename: string;
+  yamahaLabel: string;
+  soundPresetsCount: number;
+  stylePresetsCount: number;
+}
+
+const YAMAHA_TARGET_LABELS: Record<YamahaTargetKey, string> = {
+  psr_a5000: 'Yamaha PSR-A5000',
+  genos: 'Yamaha Genos / Genos2',
+  psr_sx: 'Yamaha PSR-SX Series',
+  psr_or700_a3000: 'Yamaha PSR-OR700 / A3000',
+};
+
+/**
+ * Exports a clean, DEFLATE-compressed Yamaha Arranger compatible preset & style pack
+ * mapped to XG Bank Select (MSB/LSB/PC) and Yamaha SysEx format.
+ */
+export async function exportYamahaCompatibleArchive(
+  convertedSounds: ConvertedSoundEntry[],
+  extractedStyles: ExtractedStyleEntry[],
+  targetYamahaModel: YamahaTargetKey,
+  parsedSet: ParsedPaSet | null
+): Promise<YamahaConvertedArchiveResult> {
+  const zip = new JSZip();
+  const yamahaLabel = YAMAHA_TARGET_LABELS[targetYamahaModel] || 'Yamaha Arranger';
+  const baseName = sanitizeSetFolderName(parsedSet?.setName || 'KORG_TO_YAMAHA');
+  const rootFolder = `${baseName}_${targetYamahaModel.toUpperCase()}_YAMAHA`;
+
+  const voicePresets = convertedSounds.map((entry, idx) => {
+    const xgMsb = entry.original.bankType === 'user_dk' ? 127 : 0;
+    const xgLsb = entry.targetLsb >= 64 ? 112 + ((entry.targetLsb - 64) % 16) : entry.targetLsb & 0x7f;
+    const xgPc = entry.targetPc & 0x7f;
+    return {
+      index: idx + 1,
+      name: entry.original.name,
+      korgSource: {
+        file: entry.original.sourceFile,
+        msb: entry.original.msb,
+        lsb: entry.original.lsb,
+        pc: entry.original.pc,
+      },
+      yamahaXgTarget: {
+        msb: xgMsb,
+        lsb: xgLsb,
+        pc: xgPc,
+        midiChannel: 1,
+        bankSelectHex: `B0 00 ${xgMsb.toString(16).padStart(2, '0').toUpperCase()} B0 20 ${xgLsb
+          .toString(16)
+          .padStart(2, '0')
+          .toUpperCase()} C0 ${xgPc.toString(16).padStart(2, '0').toUpperCase()}`,
+      },
+      hasLinkedKorgSamples: Boolean(entry.original.hasLinkedSamples),
+    };
+  });
+
+  const effectiveStyles =
+    extractedStyles.length > 0
+      ? extractedStyles
+      : [
+          { id: 'def_maksum', name: 'Oriental Maksum 4/4', fileName: 'OR_MAKSUM.STY', msb: 0, lsb: 0, pc: 0 },
+          { id: 'def_malfouf', name: 'Malfouf Fast 2/4', fileName: 'OR_MALFOUF.STY', msb: 0, lsb: 0, pc: 1 },
+          { id: 'def_saidi', name: 'Saidi Folk 4/4', fileName: 'OR_SAIDI.STY', msb: 0, lsb: 0, pc: 2 },
+        ];
+
+  const stylePresets = effectiveStyles.map((st, idx) => ({
+    index: idx + 1,
+    name: st.name,
+    sourceFile: st.fileName,
+    yamahaStyleTarget: `${sanitizeSetFolderName(st.name)}.SFF2.sty`,
+    midiCoord: { msb: st.msb, lsb: st.lsb, pc: st.pc },
+    sectionControlSysEx: {
+      mainA: 'F0 43 7E 00 00 00 F7',
+      mainB: 'F0 43 7E 00 01 00 F7',
+      mainC: 'F0 43 7E 00 02 00 F7',
+      mainD: 'F0 43 7E 00 03 00 F7',
+      breakFill: 'F0 43 7E 00 10 00 F7',
+      start: 'F0 43 7E 00 00 01 F7',
+      stop: 'F0 43 7E 00 7F 00 F7',
+    },
+  }));
+
+  zip.file(
+    `${rootFolder}/USER_VOICES/XG_VOICES_PRESETS.json`,
+    JSON.stringify({ targetModel: yamahaLabel, voices: voicePresets }, null, 2)
+  );
+  zip.file(
+    `${rootFolder}/USER_VOICES/XG_VOICE_BANK_TABLE.txt`,
+    [
+      `YAMAHA XG VOICE MAPPING TABLE (${yamahaLabel})`,
+      `====================================================`,
+      ...voicePresets.map(
+        (v) =>
+          `${String(v.index).padStart(3, '0')}. ${v.name.padEnd(22, ' ')} -> XG MSB=${v.yamahaXgTarget.msb} LSB=${v.yamahaXgTarget.lsb} PC=${v.yamahaXgTarget.pc} (${v.yamahaXgTarget.bankSelectHex})`
+      ),
+    ].join('\n')
+  );
+
+  zip.file(
+    `${rootFolder}/USER_STYLES/YAMAHA_STYLES_INDEX.json`,
+    JSON.stringify({ targetModel: yamahaLabel, styles: stylePresets }, null, 2)
+  );
+
+  if (parsedSet) {
+    for (const asset of parsedSet.assets) {
+      if (isHiddenOsMetadataPath(asset.path) || asset.kind !== 'style') continue;
+      const raw = parsedSet.rawFilesMap.get(asset.path);
+      if (!raw) continue;
+      zip.file(`${rootFolder}/USER_STYLES/RAW_KORG_STYLES/${asset.fileName}`, raw);
+    }
+  }
+
+  zip.file(
+    `${rootFolder}/YAMAHA_LOAD_INSTRUCTIONS.txt`,
+    [
+      `KORG & YAMAHA PRO - CROSS-PLATFORM PRESET & STYLE PACK`,
+      `Target Instrument: ${yamahaLabel}`,
+      `Voices Mapped: ${voicePresets.length}`,
+      `Styles Included: ${stylePresets.length}`,
+      ``,
+      `NOTES:`,
+      `- All macOS ._*, __MACOSX, .DS_Store, and Thumbs.db metadata files have been stripped.`,
+      `- Use USER_VOICES/XG_VOICES_PRESETS.json or the Stage MIDI Commander in YAMAHA mode`,
+      `  to recall XG voices and trigger Main A-D / Break / Start-Stop SysEx directly.`,
+    ].join('\n')
+  );
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+
+  return {
+    blob,
+    filename: `${rootFolder}.zip`,
+    yamahaLabel,
+    soundPresetsCount: voicePresets.length,
+    stylePresetsCount: stylePresets.length,
   };
 }
 

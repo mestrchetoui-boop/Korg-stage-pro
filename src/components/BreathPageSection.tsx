@@ -241,13 +241,13 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
   return (
     <div className="space-y-4">
       {/* Header Card */}
-      <div className="bg-[#0B1120] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-xl bg-[#38BDF8]/15 border border-[#38BDF8]/40 flex items-center justify-center text-[#38BDF8] shrink-0">
+          <div className="w-11 h-11 rounded-xl crystal-sapphire-jewel-active flex items-center justify-center text-[#030508] shrink-0 shadow-[0_0_16px_rgba(56,189,248,0.45)]">
             <Wind className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base sm:text-lg font-black text-[#F0F6FC]">
+            <h2 className="text-base sm:text-lg font-black text-[#F8FAFC]">
               {isAr ? 'النفخ والتحكم بالاستدامة (Breath / نفخ بالميكرو)' : 'Breath & Mic Sustain Controller (نفخ بالميكرو)'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
@@ -259,21 +259,21 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
         </div>
 
         <div dir="ltr" className="flex items-center gap-2 font-mono text-xs shrink-0">
-          <span className="px-3 py-1.5 rounded-xl bg-[#070B14] border border-[#1E293B] text-[#FFB703] font-black">
+          <span className="px-3 py-1.5 rounded-xl bg-[#030508] border-[1.5px] border-white/15 text-[#FFF08A] font-black">
             CC 2 &amp; CC 11: {breathValue} / 127
           </span>
         </div>
       </div>
 
       {/* Main Breath Touch Slider Panel */}
-      <div className="bg-[#0B1120] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-xl space-y-4 select-none">
+      <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4 select-none">
         {/* Top Controls Row: Auto-Zero vs Hold + Reset 0 + Mic Breath Sensor Toggle */}
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
             {/* Auto-Zero vs Hold Mode Toggle */}
             <div
               dir="ltr"
-              className="inline-flex rounded-xl overflow-hidden border border-[#1E293B] bg-[#070B14] p-0.5 text-xs font-mono font-black"
+              className="inline-flex rounded-xl overflow-hidden border-[1.5px] border-white/15 bg-[#030508] p-0.5 text-xs font-mono font-black"
             >
               <button
                 type="button"
@@ -285,7 +285,7 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
                 }}
                 className={`px-3 py-1.5 rounded-lg transition-all ${
                   breathMode === 'auto_zero'
-                    ? 'bg-[#FFB703] text-[#070B14] shadow-sm'
+                    ? 'hardware-keycap-gold text-[#030508] shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -296,7 +296,7 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
                 onClick={() => setBreathMode('hold')}
                 className={`px-3 py-1.5 rounded-lg transition-all ${
                   breathMode === 'hold'
-                    ? 'bg-[#38BDF8] text-[#070B14] shadow-sm'
+                    ? 'crystal-sapphire-jewel-active text-[#030508] shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -308,7 +308,7 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
             <button
               type="button"
               onClick={handleResetZero}
-              className="px-3 py-1.5 rounded-xl bg-[#070B14] hover:bg-[#111827] border border-[#38BDF8]/50 text-[#38BDF8] font-mono font-black text-xs flex items-center gap-1.5 active:scale-95 transition-all"
+              className="px-3 py-1.5 rounded-xl bg-[#030508] hover:bg-[#111827] border-[1.5px] border-[#38BDF8]/55 text-[#38BDF8] font-mono font-black text-xs flex items-center gap-1.5 active:scale-95 transition-all"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset 0</span>
@@ -320,10 +320,10 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
             type="button"
             onClick={toggleMicSensor}
             aria-pressed={isMicActive}
-            className={`px-4 py-2 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all active:scale-95 ${
+            className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all active:scale-95 ${
               isMicActive
-                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.3)]'
-                : 'bg-[#070B14] hover:bg-[#111827] border-[#FFB703]/50 text-[#FFB703]'
+                ? 'crystal-emerald-jewel-active text-[#030508]'
+                : 'hardware-keycap-dark border-[1.5px] border-[#FACC15]/55 text-[#FFF08A]'
             }`}
           >
             {isMicActive ? <Mic className="w-4 h-4 animate-pulse" /> : <MicOff className="w-4 h-4" />}
@@ -341,7 +341,7 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
             <span className="text-[#38BDF8] font-bold">
               {isAr ? 'شريط النفخ والاستدامة (0 - 127)' : 'Breath / Sustain Ribbon (0 - 127)'}
             </span>
-            <span dir="ltr" className="text-[#FFB703] font-black text-sm">
+            <span dir="ltr" className="text-[#FFF08A] font-black text-sm">
               {breathValue} <span className="text-slate-500 text-xs">({levelPct}%)</span>
             </span>
           </div>
@@ -369,12 +369,14 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
             onPointerCancel={() => {
               if (isDragging) handleReleaseSlider();
             }}
-            className="relative w-full h-24 sm:h-28 bg-[#070B14] border border-[#1E293B] rounded-2xl cursor-ew-resize overflow-hidden flex items-center shadow-inner touch-none"
+            className="relative w-full h-24 sm:h-28 oled-subpanel border-[1.5px] border-white/20 rounded-2xl cursor-ew-resize overflow-hidden flex items-center touch-none"
           >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 via-white/[0.03] to-transparent z-10" />
+
             {/* Active Breath Fill Gradient */}
             <div
               style={{ width: `${(breathValue / 127) * 100}%` }}
-              className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-[#38BDF8]/25 via-[#38BDF8]/35 to-[#FFB703]/45 border-r-2 border-[#FFB703] pointer-events-none"
+              className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-[#38BDF8]/30 via-[#0EA5E9]/35 to-[#FACC15]/45 border-r-2 border-[#FFF08A] pointer-events-none"
             />
 
             {/* Graduation Tick Marks (0, 32, 64, 96, 127) */}
@@ -388,7 +390,7 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
                     className="absolute top-0 bottom-0 -translate-x-1/2 flex flex-col items-center justify-between py-1.5"
                   >
                     <div className="w-px h-3 bg-slate-600/80" />
-                    <span className="px-1.5 py-0.5 rounded bg-[#070B14]/85 text-[10px] font-mono font-bold text-slate-400">
+                    <span className="px-1.5 py-0.5 rounded bg-[#030508]/90 text-[10px] font-mono font-bold text-slate-400">
                       {tick}
                     </span>
                   </div>
@@ -396,24 +398,24 @@ export const BreathPageSection: React.FC<BreathPageSectionProps> = ({ lang }) =>
               })}
             </div>
 
-            {/* Tactile Handle */}
+            {/* Tactile Crystal Handle */}
             <div
               style={{ left: `${(breathValue / 127) * 100}%` }}
-              className={`absolute top-2 bottom-2 w-12 sm:w-14 -translate-x-1/2 rounded-xl z-20 flex items-center justify-center gap-1 pointer-events-none ${
+              className={`absolute top-2 bottom-2 w-12 sm:w-14 -translate-x-1/2 rounded-xl z-20 flex items-center justify-center gap-1 pointer-events-none hardware-wheel-knurl ${
                 isDragging || isMicActive
-                  ? 'bg-gradient-to-b from-[#38BDF8] to-[#0284C7] border-2 border-amber-200 shadow-[0_0_22px_rgba(56,189,248,0.65)]'
-                  : 'bg-gradient-to-b from-[#334155] to-[#1E293B] border-2 border-[#FFB703]/80 shadow-[0_0_14px_rgba(255,183,3,0.35)]'
+                  ? 'border-[1.5px] border-[#BAE6FD] ring-2 ring-[#38BDF8]/70 led-glow-cyan'
+                  : 'border-[1.5px] border-[#FACC15]/85 led-glow-gold'
               }`}
             >
-              <div className="w-0.5 h-6 rounded-full bg-white/40" />
-              <div className="w-1 h-9 rounded-full bg-[#FFB703]" />
-              <div className="w-0.5 h-6 rounded-full bg-white/40" />
+              <div className="w-0.5 h-6 rounded-full bg-white/45" />
+              <div className="w-1 h-9 rounded-full bg-[#FFF08A] shadow-[0_0_8px_#FACC15]" />
+              <div className="w-0.5 h-6 rounded-full bg-white/45" />
             </div>
           </div>
         </div>
 
         {/* Mic Breath Sensitivity Control & Live Meter */}
-        <div className="bg-[#070B14] border border-[#1E293B] rounded-xl p-3.5 space-y-2.5">
+        <div className="bg-[#030508] border-[1.5px] border-white/15 rounded-xl p-3.5 space-y-2.5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 font-bold text-slate-200">
               <SlidersHorizontal className="w-3.5 h-3.5 text-[#38BDF8]" />

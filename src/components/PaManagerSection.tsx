@@ -50,9 +50,12 @@ import {
   buildExtractableSetItems,
   planSingleSoundPackDependencies,
   extractSingleSoundPackZip,
+  inspectRamBreakdown,
+  exportYamahaCompatibleArchive,
   triggerBlobDownload,
   formatBytes,
 } from '../services/paSetManager';
+import { YamahaModelId, YAMAHA_MODELS } from '../services/yamahaMidi';
 
 interface PaManagerSectionProps {
   isPro: boolean;
@@ -60,6 +63,8 @@ interface PaManagerSectionProps {
   onPadsImported: () => void;
   onGoToStage: () => void;
   lang: 'ar' | 'en';
+  activeBrand?: 'korg' | 'yamaha';
+  yamahaModel?: YamahaModelId;
 }
 
 export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
@@ -68,6 +73,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
   onPadsImported,
   onGoToStage,
   lang,
+  activeBrand = 'korg',
+  yamahaModel = 'psr_a5000',
 }) => {
   const isAr = lang === 'ar';
 
@@ -84,6 +91,9 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
   // Converter state
   const [sourceModel, setSourceModel] = useState<KorgPaModelId>('pa4x');
   const [targetModel, setTargetModel] = useState<KorgPaModelId>('pa3x');
+  const [ramInspectorModel, setRamInspectorModel] = useState<KorgPaModelId>('pa3x');
+  const [targetYamahaModel, setTargetYamahaModel] = useState<YamahaModelId>(yamahaModel);
+  const [isExportingYamaha, setIsExportingYamaha] = useState<boolean>(false);
   const [manualTextInput, setManualTextInput] = useState<string>('');
   const [manualSounds, setManualSounds] = useState<ExtractedSoundBankEntry[]>([]);
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
@@ -92,6 +102,10 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
   const [converterSearchQuery, setConverterSearchQuery] = useState<string>('');
   const [targetStageBank, setTargetStageBank] = useState<number>(1);
   const [isExportingSingleSound, setIsExportingSingleSound] = useState<boolean>(false);
+
+  useEffect(() => {
+    setTargetYamahaModel(yamahaModel);
+  }, [yamahaModel]);
 
   // Feature #3: Mobile Set Combiner state
   const [setA, setSetA] = useState<ParsedPaSet | null>(null);
@@ -139,10 +153,18 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
     setLastExtractedPack(null);
     setImportedToStage(false);
     setScanError(null);
+    const hiddenNoteAr =
+      result.ignoredHiddenFilesCount > 0
+        ? ` · تم تجاهل ${result.ignoredHiddenFilesCount} ملف ._ مخفي (macOS)`
+        : '';
+    const hiddenNoteEn =
+      result.ignoredHiddenFilesCount > 0
+        ? ` · ${result.ignoredHiddenFilesCount} hidden ._ files stripped`
+        : '';
     showToast(
       isAr
-        ? `تم فحص السيت (${result.setName}): ${result.totalFiles} ملفاً، تم العثور على ${result.unusedSoundAndPcmAssets.length} عنصر غير مستخدم.`
-        : `Scanned ${result.setName}: ${result.totalFiles} files, ${result.unusedSoundAndPcmAssets.length} unused assets found.`
+        ? `تم فحص السيت (${result.setName}): ${result.totalFiles} ملفاً، تم العثور على ${result.unusedSoundAndPcmAssets.length} عنصر غير مستخدم${hiddenNoteAr}.`
+        : `Scanned ${result.setName}: ${result.totalFiles} files, ${result.unusedSoundAndPcmAssets.length} unused assets found${hiddenNoteEn}.`
     );
   };
 
@@ -340,6 +362,25 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
     );
   };
 
+  const handleOneClickCleanAndExport = async () => {
+    if (!isPro) {
+      onRequirePro(isAr ? 'تنظيف وتصدير السيت النظيف' : 'Clean & Export SET');
+      return;
+    }
+    if (!parsedSet) return;
+    const autoRemovePaths = new Set<string>(parsedSet.unusedSoundAndPcmAssets.map((a) => a.path));
+    selectedForRemoval.forEach((p) => autoRemovePaths.add(p));
+    setSelectedForRemoval(autoRemovePaths);
+
+    const res = await buildCleanSetZip(parsedSet, autoRemovePaths);
+    triggerBlobDownload(res.blob, res.filename);
+    showToast(
+      isAr
+        ? `تم تنظيف ${res.removedCount} ملف غير مستخدم/مخفي وتصدير سيت مضغوط نظيف (${formatBytes(res.savedBytes)} وُفّرت) — ${res.filename}`
+        : `Auto-cleaned ${res.removedCount} unused/hidden files (${formatBytes(res.savedBytes)} saved) — Downloading compressed ${res.filename}`
+    );
+  };
+
   const combinedSourceSounds = useMemo(() => {
     const fromSet = parsedSet?.extractedSounds || [];
     return [...fromSet, ...manualSounds];
@@ -375,6 +416,37 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
   const modelCompatibility = useMemo(() => {
     return inspectModelCompatibility(parsedSet, sourceModel, targetModel);
   }, [parsedSet, sourceModel, targetModel]);
+
+  const ramInspectorReport = useMemo(() => {
+    return inspectRamBreakdown(parsedSet, ramInspectorModel);
+  }, [parsedSet, ramInspectorModel]);
+
+  const handleExportYamahaArchive = async () => {
+    if (!isPro) {
+      onRequirePro(isAr ? 'تحويل وتصدير بريسيتات ياماها' : 'Yamaha Presets & Styles Converter');
+      return;
+    }
+    const targetList = selectedConvertedSounds.length > 0 ? selectedConvertedSounds : convertedSounds;
+    setIsExportingYamaha(true);
+    try {
+      const res = await exportYamahaCompatibleArchive(
+        targetList,
+        parsedSet?.extractedStyles || [],
+        targetYamahaModel,
+        parsedSet
+      );
+      triggerBlobDownload(res.blob, res.filename);
+      showToast(
+        isAr
+          ? `تم تصدير ${res.soundPresetsCount} صوت XG و ${res.stylePresetsCount} إيقاع متوافق مع ${res.yamahaLabel}`
+          : `Exported ${res.soundPresetsCount} XG voices & ${res.stylePresetsCount} Styles for ${res.yamahaLabel}`
+      );
+    } catch {
+      showToast(isAr ? 'تعذر إنشاء أرشيف ياماها' : 'Failed to build Yamaha compatible archive');
+    } finally {
+      setIsExportingYamaha(false);
+    }
+  };
 
   const toggleConverterSoundSelection = (id: string) => {
     setSelectedConverterSoundIds((prev) => {
@@ -596,8 +668,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       triggerBlobDownload(result.blob, result.filename);
       showToast(
         isAr
-          ? `تم دمج ${result.soundBanksCount} بنك أصوات و ${result.styleBanksCount} بنك إيقاعات (STORE) — جاري تنزيل ${result.filename}`
-          : `Merged ${result.soundBanksCount} PCG & ${result.styleBanksCount} STY banks (STORE) — Downloading ${result.filename}`
+          ? `تم دمج ${result.soundBanksCount} بنك أصوات و ${result.styleBanksCount} بنك إيقاعات (DEFLATE مضغوط) — جاري تنزيل ${result.filename}`
+          : `Merged ${result.soundBanksCount} PCG & ${result.styleBanksCount} STY banks (DEFLATE) — Downloading ${result.filename}`
       );
     } catch {
       showToast(isAr ? 'حدث خطأ أثناء دمج السيتين' : 'Error merging sets');
@@ -690,8 +762,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
               </div>
               <p className="text-neutral-400 leading-relaxed">
                 {isAr
-                  ? 'اختر بنوك .PCG و .STY من سيتين مختلفين وادمجها في سيت واحد مرقم وجاهز لفلاشة USB بسرعة STORE.'
-                  : 'Merge specific .PCG and .STY banks from two .SET.zip archives into one cleanly numbered USB-ready .SET.zip.'}
+                  ? 'اختر بنوك .PCG و .STY من سيتين مختلفين وادمجها في سيت واحد مرقم وجاهز لفلاشة USB بضغط DEFLATE.'
+                  : 'Merge specific .PCG and .STY banks from two .SET.zip archives into one cleanly numbered compressed USB-ready .SET.zip.'}
               </p>
             </div>
 
@@ -728,13 +800,18 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDropSetFiles}
-        className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4"
+        className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4"
       >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-neutral-800">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/15">
           <div>
             <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <FolderCog className="w-5 h-5 text-amber-400" />
-              <span>{isAr ? 'إدارة السيتات الاحترافية (PA Manager)' : 'KORG PA Set Manager'}</span>
+              <FolderCog className="w-5 h-5 text-[#FACC15]" />
+              <span>{isAr ? 'مدير السيتات الاحترافي (Set Manager Pro)' : 'Set Manager Pro & Sample Converter'}</span>
+              {activeBrand === 'yamaha' && (
+                <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/50 text-sky-200 font-mono">
+                  YAMAHA READY
+                </span>
+              )}
             </h2>
             <p className="text-xs text-neutral-400 mt-1">
               {isAr
@@ -796,31 +873,58 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
 
         {/* Loaded Set Overview Strip */}
         {parsedSet ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 col-span-2 sm:col-span-1">
-              <span className="text-[10px] text-neutral-500 block">{isAr ? 'السيت المحمّل' : 'Loaded SET'}</span>
-              <span className="font-black text-amber-300 truncate block mt-0.5">{parsedSet.setName}</span>
-              <span className="text-[10px] font-mono text-neutral-400">{formatBytes(parsedSet.totalSizeBytes)}</span>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 col-span-2 sm:col-span-1">
+                <span className="text-[10px] text-neutral-500 block">{isAr ? 'السيت المحمّل' : 'Loaded SET'}</span>
+                <span className="font-black text-amber-300 truncate block mt-0.5">{parsedSet.setName}</span>
+                <span className="text-[10px] font-mono text-neutral-400">{formatBytes(parsedSet.totalSizeBytes)}</span>
+              </div>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+                <span className="text-[10px] text-neutral-500 block">{isAr ? 'الإيقاعات (.STY)' : 'Styles (.STY)'}</span>
+                <span className="text-base font-mono font-black text-yellow-400">{parsedSet.stylesCount}</span>
+              </div>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+                <span className="text-[10px] text-neutral-500 block">{isAr ? 'الأداء والباد' : 'Perform / Pad'}</span>
+                <span className="text-base font-mono font-black text-purple-300">{parsedSet.performancesCount + parsedSet.padsCount}</span>
+              </div>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+                <span className="text-[10px] text-neutral-500 block">{isAr ? 'بنوك الأصوات (.PCG)' : 'Sound Banks'}</span>
+                <span className="text-base font-mono font-black text-cyan-400">{parsedSet.soundsCount}</span>
+              </div>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+                <span className="text-[10px] text-neutral-500 block">{isAr ? 'ملفات PCM / KMP' : 'PCM / Samples'}</span>
+                <span className="text-base font-mono font-black text-emerald-400">{parsedSet.pcmCount}</span>
+              </div>
+              <div className="bg-neutral-950 border border-rose-500/30 rounded-xl p-3">
+                <span className="text-[10px] text-rose-300/80 block">{isAr ? 'مساحة قابلة للتوفير' : 'Reclaimable Space'}</span>
+                <span className="text-base font-mono font-black text-rose-400">{formatBytes(parsedSet.reclaimableBytes)}</span>
+              </div>
             </div>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-              <span className="text-[10px] text-neutral-500 block">{isAr ? 'الإيقاعات (.STY)' : 'Styles (.STY)'}</span>
-              <span className="text-base font-mono font-black text-yellow-400">{parsedSet.stylesCount}</span>
-            </div>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-              <span className="text-[10px] text-neutral-500 block">{isAr ? 'الأداء والباد' : 'Perform / Pad'}</span>
-              <span className="text-base font-mono font-black text-purple-300">{parsedSet.performancesCount + parsedSet.padsCount}</span>
-            </div>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-              <span className="text-[10px] text-neutral-500 block">{isAr ? 'بنوك الأصوات (.PCG)' : 'Sound Banks'}</span>
-              <span className="text-base font-mono font-black text-cyan-400">{parsedSet.soundsCount}</span>
-            </div>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-              <span className="text-[10px] text-neutral-500 block">{isAr ? 'ملفات PCM / KMP' : 'PCM / Samples'}</span>
-              <span className="text-base font-mono font-black text-emerald-400">{parsedSet.pcmCount}</span>
-            </div>
-            <div className="bg-neutral-950 border border-rose-500/30 rounded-xl p-3">
-              <span className="text-[10px] text-rose-300/80 block">{isAr ? 'مساحة قابلة للتوفير' : 'Reclaimable Space'}</span>
-              <span className="text-base font-mono font-black text-rose-400">{formatBytes(parsedSet.reclaimableBytes)}</span>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-emerald-950/25 border border-emerald-500/30 text-[11px]">
+              <span className="flex items-center gap-1.5 text-emerald-300 font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {parsedSet.ignoredHiddenFilesCount > 0
+                    ? (isAr
+                        ? `حماية تلقائية: تم استبعاد وحذف ${parsedSet.ignoredHiddenFilesCount} ملف نظام مخفي (._* / __MACOSX) لمنع أخطاء القراءة على الأورج.`
+                        : `Auto-Sanitized: Stripped ${parsedSet.ignoredHiddenFilesCount} hidden macOS/iOS (._* / __MACOSX) metadata files to prevent keyboard disk errors.`)
+                    : (isAr
+                        ? 'حماية تلقائية مفعّلة: يتم فلترة أي ملفات مخفية (._* / .DS_Store / __MACOSX) تلقائياً.'
+                        : 'Auto-Sanitize Active: Hidden macOS/iOS (._* / .DS_Store / __MACOSX) files are automatically excluded.')}
+                </span>
+              </span>
+              {parsedSet.unusedSoundAndPcmAssets.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleOneClickCleanAndExport}
+                  className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-[#05070B] font-black text-[11px] flex items-center gap-1 shadow transition-all active:scale-95"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>{isAr ? 'تنظيف وضغط السيت بضغطة واحدة (.SET.zip)' : '1-Click Clean & Export Compressed .SET'}</span>
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -894,15 +998,15 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       </div>
 
       {/* =================================================================== */}
-      {/* TOOL 1: CLEAN UNUSED SOUNDS / PCM                                   */}
+      {/* TOOL 1: CLEAN UNUSED SOUNDS / PCM & PIANO MANAGER RAM INSPECTOR     */}
       {/* =================================================================== */}
       {activeTool === 'cleaner' && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <HardDrive className="w-4 h-4 text-amber-400" />
-                <span>{isAr ? 'تقرير فحص الأصوات والسامبلات غير المستخدمة' : 'Unused Sounds & PCM Inspection Report'}</span>
+                <HardDrive className="w-4 h-4 text-[#FACC15]" />
+                <span>{isAr ? 'فاحص ذاكرة RAM وتنظيف الأصوات غير المستخدمة' : 'RAM Inspector & Unused Sounds/PCM Cleaner'}</span>
               </h3>
               <p className="text-xs text-neutral-400 mt-0.5">
                 {isAr
@@ -924,10 +1028,10 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                     key={f.id}
                     type="button"
                     onClick={() => setCleanerFilter(f.id)}
-                    className={`px-2.5 py-1 rounded-lg font-bold border transition-all ${
+                    className={`px-2.5 py-1 rounded-lg font-bold border-[1.5px] transition-all ${
                       cleanerFilter === f.id
-                        ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                        : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                        ? 'bg-[#FACC15]/20 border-[#FACC15] text-[#FFF08A]'
+                        : 'bg-[#030508] border-white/15 text-neutral-400 hover:text-white'
                     }`}
                   >
                     {isAr ? f.ar : f.en}
@@ -945,6 +1049,78 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
             </div>
           ) : (
             <>
+              {/* Piano Manager Style RAM Inspector Panel */}
+              <div className="bg-[#030508] border-[1.5px] border-white/15 rounded-xl p-4 space-y-3 text-xs shadow-inner">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-black text-white">
+                    <Cpu className="w-4 h-4 text-cyan-300" />
+                    <span>{isAr ? 'مقياس ذاكرة السامبلات (Piano Manager RAM Inspector)' : 'Piano Manager RAM Inspector'}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                      ramInspectorReport.overLimit
+                        ? 'bg-rose-500/20 border-rose-400/60 text-rose-300'
+                        : 'bg-emerald-500/20 border-emerald-400/60 text-emerald-300'
+                    }`}>
+                      {ramInspectorReport.totalPcmKmpMb.toFixed(1)} / {ramInspectorReport.ramExpandedMb} MB
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-neutral-400 font-bold">
+                      {isAr ? 'سعة الأورج:' : 'Model RAM:'}
+                    </span>
+                    <select
+                      value={ramInspectorModel}
+                      onChange={(e) => setRamInspectorModel(e.target.value as KorgPaModelId)}
+                      className="bg-[#080D16] text-cyan-300 font-bold text-xs border-[1.5px] border-white/15 rounded-lg px-2.5 py-1 focus:outline-none focus:border-cyan-400"
+                    >
+                      {Object.values(PA_MODEL_SPECS).map((m) => (
+                        <option key={`ram_${m.id}`} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Segmented Crystal RAM Bar */}
+                <div className="h-3.5 w-full rounded-full bg-white/5 border border-white/15 overflow-hidden flex">
+                  <div
+                    style={{ width: `${ramInspectorReport.usedPct}%` }}
+                    className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all"
+                    title={`Used PCM/KMP: ${ramInspectorReport.usedPcmKmpMb.toFixed(2)} MB`}
+                  />
+                  <div
+                    style={{ width: `${ramInspectorReport.unusedPct}%` }}
+                    className="h-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all"
+                    title={`Unused PCM/KMP: ${ramInspectorReport.unusedPcmKmpMb.toFixed(2)} MB`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                    <span className="text-neutral-400 block">{isAr ? 'مستخدم فعلياً (PCM/KMP)' : 'Used PCM/KMP'}</span>
+                    <span className="font-mono font-black text-emerald-300">
+                      {ramInspectorReport.usedPcmKmpMb.toFixed(1)} MB ({ramInspectorReport.usedSampleCount})
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                    <span className="text-neutral-400 block">{isAr ? 'غير مستعمل (مهدر)' : 'Unused / Orphaned'}</span>
+                    <span className="font-mono font-black text-rose-300">
+                      {ramInspectorReport.unusedPcmKmpMb.toFixed(1)} MB ({ramInspectorReport.unusedSampleCount})
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                    <span className="text-neutral-400 block">{isAr ? 'المساحة الحرة المتبقية' : 'Free Expanded RAM'}</span>
+                    <span className="font-mono font-black text-cyan-300">
+                      {ramInspectorReport.freeExpandedMb.toFixed(1)} MB
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/10">
+                    <span className="text-neutral-400 block">{isAr ? 'بنوك .PCG (مستخدم / مهدر)' : '.PCG Banks (Used / Unused)'}</span>
+                    <span className="font-mono font-black text-[#FFF08A]">
+                      {ramInspectorReport.usedSoundCount} / {ramInspectorReport.unusedSoundCount}
+                    </span>
+                  </div>
+                </div>
+              </div>
               {/* Selection Actions & Clean Export CTA */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-neutral-950 border border-neutral-800 rounded-xl p-3.5 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
@@ -969,15 +1145,27 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleDownloadCleanSet}
-                  disabled={selectedForRemoval.size === 0}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 shrink-0"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>{isAr ? 'حذف الأصوات غير المستعملة وتنزيل السيت النظيف' : 'Remove Unused & Download Clean SET'}</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleOneClickCleanAndExport}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#FDE047] to-[#CA8A04] hover:from-[#FEF08A] hover:to-[#EAB308] text-[#05070B] font-black text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all active:scale-95"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>{isAr ? 'حذف كل غير المستخدم وتصدير أرشيف مضغوط (ضغطة واحدة)' : '1-Click Delete Unused & Export Clean Compressed .SET'}</span>
+                  </button>
+
+                  {selectedForRemoval.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadCleanSet}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow transition-all active:scale-95"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{isAr ? 'تنزيل المحدد فقط' : 'Download Selected'}</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Assets List */}
@@ -1054,27 +1242,27 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       )}
 
       {/* =================================================================== */}
-      {/* TOOL 2: PA MODEL CONVERTER & APP BUTTON IMPORTER                    */}
+      {/* TOOL 2: PA MODEL CONVERTER, YAMAHA EXPORTER & STAGE IMPORTER        */}
       {/* =================================================================== */}
       {activeTool === 'converter' && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Layers className="w-4 h-4 text-cyan-400" />
-                <span>{isAr ? 'محوّل بنوك الأصوات والموديلات (PA Model Converter)' : 'PA Model Bank Converter & Stage Importer'}</span>
+                <span>{isAr ? 'محوّل السيتات والأصوات (KORG Pa & Yamaha)' : 'Cross-Platform Converter (KORG Pa & Yamaha)'}</span>
               </h3>
               <p className="text-xs text-neutral-400 mt-0.5">
                 {isAr
-                  ? 'تعديل أرقام البنوك (MSB / LSB / PC) تلقائياً بين موديلات KORG Pa وتحويلها إلى أزرار جاهزة داخل التطبيق.'
-                  : 'Automatically remaps MSB / LSB / PC sound banks across KORG Pa models and converts them into ready Stage buttons.'}
+                  ? 'تعديل أرقام البنوك وترويسات KORG Pa، أو تصدير حزمة أصوات XG وإيقاعات متوافقة مع أجهزة Yamaha (PSR-A5000 / Genos2 / SX).'
+                  : 'Remap KORG Pa sound banks & headers, or export XG voices & style maps compatible with Yamaha arrangers (PSR-A5000 / Genos2 / SX).'}
               </p>
             </div>
 
             <button
               type="button"
               onClick={() => setShowManualInput(!showManualInput)}
-              className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs font-bold text-cyan-300 flex items-center gap-1.5 self-start sm:self-auto"
+              className="px-3 py-1.5 rounded-lg hardware-keycap-dark border-[1.5px] text-xs font-bold text-cyan-300 flex items-center gap-1.5 self-start sm:self-auto"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{isAr ? 'إدخال قائمة أصوات يدوياً' : 'Paste Sound List'}</span>
@@ -1397,10 +1585,47 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                 type="button"
                 disabled={convertedSounds.length === 0 && binaryPatchPreviews.length === 0}
                 onClick={handleExportConvertedSet}
-                className="px-3.5 py-2.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5 shadow transition-all active:scale-95"
+                className="px-3.5 py-2.5 rounded-xl crystal-sapphire-jewel text-sky-100 border-[1.5px] disabled:opacity-40 font-bold text-xs flex items-center gap-1.5 shadow active-press"
               >
                 <FileArchive className="w-4 h-4" />
                 <span>{isAr ? `تنزيل السيت الكامل (${targetModel.toUpperCase()})` : `Full ${targetModel.toUpperCase()} .SET.zip`}</span>
+              </button>
+            </div>
+
+            {/* Cross-Platform Yamaha Arranger Preset & Style Exporter */}
+            <div className="pt-3 mt-1 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-black text-sky-300">
+                  {isAr ? 'تصدير متوافق مع ياماها (Yamaha Arranger):' : 'Export Compatible Yamaha Presets & Styles:'}
+                </span>
+                <select
+                  value={targetYamahaModel}
+                  onChange={(e) => setTargetYamahaModel(e.target.value as YamahaModelId)}
+                  className="bg-[#030508] text-sky-200 font-bold text-xs border-[1.5px] border-sky-400/40 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                >
+                  {YAMAHA_MODELS.map((ym) => (
+                    <option key={ym.id} value={ym.id}>{ym.label}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] font-mono text-neutral-400">
+                  {isAr
+                    ? `${convertedSounds.length} صوت XG · ${parsedSet?.extractedStyles.length || 3} إيقاع`
+                    : `${convertedSounds.length} XG Voices · ${parsedSet?.extractedStyles.length || 3} Styles`}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                disabled={isExportingYamaha}
+                onClick={handleExportYamahaArchive}
+                className="px-4 py-2 rounded-xl crystal-sapphire-jewel-active text-[#030508] font-black text-xs flex items-center justify-center gap-1.5 shadow-lg active-press disabled:opacity-40 shrink-0"
+              >
+                <Download className="w-4 h-4" />
+                <span>
+                  {isExportingYamaha
+                    ? (isAr ? 'جاري التحويل...' : 'Converting...')
+                    : (isAr ? 'تصدير حزمة ياماها (.zip)' : 'Export Yamaha Presets & Styles (.zip)')}
+                </span>
               </button>
             </div>
           </div>
@@ -1503,7 +1728,20 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                           />
                         </td>
                         <td className="py-2.5 px-3">
-                          <div className="font-bold text-white">{item.original.name}</div>
+                          <div className="font-bold text-white flex flex-wrap items-center gap-1.5">
+                            <span>{item.original.name}</span>
+                            {item.original.hasLinkedSamples ? (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border-[1.5px] border-emerald-400/60 text-emerald-300 text-[9px] font-black shadow-[0_0_8px_rgba(16,185,129,0.25)]">
+                                {isAr
+                                  ? `سامبل مرتبط (${item.original.linkedKmpCount || 0} KMP · ${item.original.linkedPcmCount || 0} PCM)`
+                                  : `PCM/KMP Linked (${item.original.linkedKmpCount || 0} KMP · ${item.original.linkedPcmCount || 0} PCM)`}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-yellow-500/20 border-[1.5px] border-yellow-400/65 text-yellow-300 text-[9px] font-black shadow-[0_0_8px_rgba(250,204,21,0.2)]">
+                                {isAr ? 'PCG فقط · يحتاج ربط سامبل' : 'PCG-Only · Needs Sample Assignment'}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] font-mono text-neutral-500">{item.original.sourceFile}</div>
                         </td>
                         <td className="py-2.5 px-3 font-mono text-neutral-300" dir="ltr">
@@ -1534,8 +1772,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       {/* TOOL 3: MOBILE SET COMBINER (دمج سيتين في سيت واحد)                */}
       {/* =================================================================== */}
       {activeTool === 'combiner' && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <GitMerge className="w-4 h-4 text-emerald-400" />
@@ -1543,8 +1781,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
               </h3>
               <p className="text-xs text-neutral-400 mt-0.5">
                 {isAr
-                  ? 'حمّل ملفين (.SET.zip) وحدد بنوك الأصوات (.PCG) وبنوك الإيقاعات (.STY) المطلوبة من كل سيت، ثم صدّر سيت واحد مرقّم جاهز لليوإس بي بضغط STORE السريع.'
-                  : 'Load two .SET.zip archives, pick specific .PCG Sound banks and .STY Style banks from Set A & Set B, and export a cleanly numbered USB-ready .SET.zip using fast STORE compression.'}
+                  ? 'حمّل ملفين (.SET.zip) وحدد بنوك الأصوات (.PCG) وبنوك الإيقاعات (.STY) المطلوبة من كل سيت، ثم صدّر سيت واحد مرقّم ونظيف مضغوط (DEFLATE) جاهز لليوإس بي.'
+                  : 'Load two .SET.zip archives, pick specific .PCG Sound banks and .STY Style banks from Set A & Set B, and export a cleanly numbered compressed USB-ready .SET.zip (DEFLATE).'}
               </p>
             </div>
           </div>
@@ -1825,8 +2063,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
               <Download className="w-4 h-4" />
               <span>
                 {isMerging
-                  ? (isAr ? 'جاري الدمج السريع...' : 'Merging...')
-                  : (isAr ? 'دمج وتنزيل السيت الموحّد (.SET.zip · STORE)' : 'Merge & Download .SET.zip (STORE)')}
+                  ? (isAr ? 'جاري الدمج والضغط...' : 'Merging & Compressing...')
+                  : (isAr ? 'دمج وتنزيل السيت الموحّد (.SET.zip مضغوط)' : 'Merge & Download .SET.zip (DEFLATE)')}
               </span>
             </button>
           </div>
@@ -1848,8 +2086,8 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
       {/* TOOL 4: EXTRACT SINGLE SOUND PACK (.SET.zip) FOR ALL KORG PA MODELS */}
       {/* =================================================================== */}
       {activeTool === 'extractor' && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-white/15">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <PackageCheck className="w-4 h-4 text-purple-400" />
@@ -1999,8 +2237,17 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                               {item.itemType === 'sound' ? 'SOUND' : 'PERFORM'}
                             </span>
                             <div className="min-w-0">
-                              <div className={`text-xs font-bold truncate ${isSelected ? 'text-white' : 'text-neutral-200'}`}>
-                                {item.name}
+                              <div className={`text-xs font-bold truncate flex flex-wrap items-center gap-1.5 ${isSelected ? 'text-white' : 'text-neutral-200'}`}>
+                                <span className="truncate">{item.name}</span>
+                                {item.hasLinkedSamples ? (
+                                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border-[1.5px] border-emerald-400/60 text-emerald-300 text-[9px] font-black shrink-0">
+                                    {isAr ? 'PCM/KMP مرتبط' : 'PCM/KMP Linked'}
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.2 rounded bg-yellow-500/20 border-[1.5px] border-yellow-400/65 text-yellow-300 text-[9px] font-black shrink-0">
+                                    {isAr ? 'PCG فقط · يحتاج ربط سامبل' : 'PCG-Only · Needs Sample Assignment'}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-neutral-500 font-mono truncate" dir="ltr">
                                 {item.bankLabel} · {item.sourceFile}
@@ -2009,7 +2256,7 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0">
-                            <span dir="ltr" className="text-[11px] font-mono font-bold text-cyan-300 bg-neutral-950 border border-neutral-800 px-2 py-0.5 rounded">
+                            <span dir="ltr" className="text-[11px] font-mono font-bold text-cyan-300 bg-[#030508] border border-white/15 px-2 py-0.5 rounded">
                               {item.midiCoord}
                             </span>
                             {isSelected && <CheckCircle2 className="w-4 h-4 text-purple-300" />}
@@ -2022,14 +2269,23 @@ export const PaManagerSection: React.FC<PaManagerSectionProps> = ({
               </div>
 
               {/* Right: Pruned Binary Folders Preview & .SET.zip Export */}
-              <div className="lg:col-span-5 bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between space-y-4">
+              <div className="lg:col-span-5 bg-[#030508] border-[1.5px] border-white/15 rounded-xl p-4 flex flex-col justify-between space-y-4">
                 {selectedExtractorItem && (
                   <>
                     <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-neutral-800">
+                      <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-white/15">
                         <div className="min-w-0">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-purple-300">
-                            {isAr ? 'العنصر المختار للاستخراج' : 'Selected Extraction Target'}
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-purple-300 flex items-center gap-2">
+                            <span>{isAr ? 'العنصر المختار للاستخراج' : 'Selected Extraction Target'}</span>
+                            {extractorPlan.multisampleAssets.length > 0 || extractorPlan.pcmAssets.length > 0 ? (
+                              <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border-[1.5px] border-emerald-400/60 text-emerald-300 text-[9px] font-black">
+                                {isAr ? 'PCM/KMP مرتبط' : 'PCM/KMP Linked'}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded bg-yellow-500/20 border-[1.5px] border-yellow-400/65 text-yellow-300 text-[9px] font-black">
+                                {isAr ? 'PCG فقط · يحتاج ربط سامبل' : 'PCG-Only · Needs Sample Assignment'}
+                              </span>
+                            )}
                           </div>
                           <h4 className="text-sm font-black text-white truncate mt-0.5">
                             {selectedExtractorItem.name}

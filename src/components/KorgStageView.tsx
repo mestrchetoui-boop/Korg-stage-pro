@@ -20,6 +20,15 @@ import {
 } from '../data/uiThemes';
 import { Edit3, Check, X, Play, Square, Music, Radio, Volume2, VolumeX, Save, Sparkles, Smartphone, RotateCcw, Send, Usb, Lock, Trash2, SkipForward, Waves, Plus, ListMusic, Maximize2, Minimize2, Palette } from 'lucide-react';
 import { KeyboardEngineMode, sendKronosProgramSelect } from '../services/korgExtraMidi';
+import {
+  YamahaModelId,
+  getYamahaModelSpec,
+  sendYamahaScaleTuning,
+  sendYamahaStyleControl,
+  sendYamahaStyleSelect,
+  sendYamahaStyleStartStop,
+  sendYamahaVoiceSelect,
+} from '../services/yamahaMidi';
 
 interface KorgStageViewProps {
   tunings: Record<NoteName, NoteTuning>;
@@ -29,6 +38,8 @@ interface KorgStageViewProps {
   lang: 'ar' | 'en';
   uiSettings?: UiCustomizationSettings;
   keyboardMode?: KeyboardEngineMode;
+  activeBrand?: 'korg' | 'yamaha';
+  yamahaModel?: YamahaModelId;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
@@ -93,16 +104,16 @@ interface BankColorTheme {
 const BANK_COLOR_PALETTE: Record<BankColorId, BankColorTheme> = {
   gold: {
     id: 'gold',
-    labelAr: 'ذهبي',
-    labelEn: 'Gold',
-    swatchClass: 'bg-[#FACC15] border-amber-200',
+    labelAr: 'ذهبي سائل 8K',
+    labelEn: 'Liquid Gold 8K',
+    swatchClass: 'bg-gradient-to-br from-[#FFF08A] via-[#FACC15] to-[#B45309] border-[#FEF9C3]',
     dotClass: 'bg-[#FACC15]',
-    tabActive: 'bg-[#FFB703] text-[#070B14] border-amber-200 shadow-[0_0_10px_rgba(255,183,3,0.6)]',
-    tabInactive: 'bg-[#111827] text-amber-300 border-amber-500/45 hover:bg-amber-500/15',
-    padIdle: 'bg-gradient-to-b from-[#EAB308] to-[#CA8A04] hover:from-[#FACC15] hover:to-[#EAB308] border border-amber-300/60 shadow-md',
-    padActive: 'bg-gradient-to-b from-[#FEF08A] to-[#FACC15] border-2 border-white ring-2 ring-[#FFB703] shadow-[0_0_18px_rgba(250,204,21,0.85)]',
-    padTextIdle: 'text-[#070B14]',
-    padTextActive: 'text-[#070B14]',
+    tabActive: 'hardware-keycap-gold-active text-[#030508]',
+    tabInactive: 'bg-[#030508] text-[#FFF08A] border-[1.5px] border-white/15 hover:border-[#FACC15]/70',
+    padIdle: 'hardware-keycap-gold border-[1.5px]',
+    padActive: 'hardware-keycap-gold-active border-[1.5px]',
+    padTextIdle: 'text-[#030508]',
+    padTextActive: 'text-[#030508]',
   },
   cyan: {
     id: 'cyan',
@@ -439,6 +450,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
   lang,
   uiSettings = DEFAULT_UI_SETTINGS,
   keyboardMode = 'pa_series',
+  activeBrand = 'korg',
+  yamahaModel = 'psr_a5000',
   isFullscreen = false,
   onToggleFullscreen,
 }) => {
@@ -619,6 +632,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
     return null;
   });
   const [isPlayingRhythm, setIsPlayingRhythm] = useState<boolean>(false);
+  const [activeVariation, setActiveVariation] = useState<1 | 2 | 3 | 4>(1);
 
   // Feature #2: Maqam Drone (Ch 3 / Pad) & Live Stage Setlist ("Next Song")
   const [droneRoot, setDroneRoot] = useState<DroneRootKey>(() => {
@@ -936,6 +950,17 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
     const norm = normalizeSoundPad(pad);
     const bankNumber = norm.bankNumber ?? 0;
     const performanceNumber = norm.performanceNumber ?? 1;
+    if (activeBrand === 'yamaha') {
+      const ch = channels.upper1 || 1;
+      const spec = getYamahaModelSpec(yamahaModel);
+      sendYamahaVoiceSelect(spec.defaultVoiceMsb, bankNumber, performanceNumber - 1, ch, norm.name);
+      showToast(
+        isAr
+          ? `${spec.shortLabel} Ch ${ch} · بنك ${bankNumber} · PC ${performanceNumber - 1}: ${norm.name}`
+          : `${spec.shortLabel} Ch ${ch} · Bank ${bankNumber} · PC ${performanceNumber - 1}: ${norm.name}`
+      );
+      return;
+    }
     if (keyboardMode === 'kronos') {
       sendKronosProgramSelect(bankNumber, performanceNumber, norm.name);
       showToast(
@@ -1013,6 +1038,25 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
     if (autoStart) {
       stopMaqamDrone(true);
       setIsPlayingRhythm(true);
+    }
+    if (activeBrand === 'yamaha') {
+      sendYamahaStyleSelect(
+        normalizedStyle.msb,
+        normalizedStyle.lsb,
+        normalizedStyle.pc,
+        normalizedStyle.name,
+        yamahaModel
+      );
+      if (autoStart) {
+        sendYamahaStyleStartStop('start', yamahaModel);
+      }
+      const spec = getYamahaModelSpec(yamahaModel);
+      showToast(
+        isAr
+          ? `إيقاع ${spec.shortLabel}: ${normalizedStyle.name}`
+          : `${spec.shortLabel} Style: ${normalizedStyle.name}`
+      );
+      return;
     }
     midiEngine.sendStyleSelect(normalizedStyle.msb, normalizedStyle.lsb, normalizedStyle.pc, normalizedStyle.name, {
       singleNumberOnly: isSingleNumber,
@@ -1104,7 +1148,9 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
   };
 
   const sendScaleAndToast = (updated: Record<NoteName, NoteTuning>, normalMsg: string) => {
-    const res = midiEngine.sendQuarterToneScale(updated);
+    const res = activeBrand === 'yamaha'
+      ? sendYamahaScaleTuning(updated, yamahaModel)
+      : midiEngine.sendQuarterToneScale(updated);
     if (res.sysexBlocked) {
       showToast(
         isAr
@@ -1224,7 +1270,11 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
     const updatedTunings = buildTuningsFromNotes(notes);
     setTunings(updatedTunings);
     audioEngine.setTunings(updatedTunings);
-    midiEngine.sendQuarterToneScale(updatedTunings);
+    if (activeBrand === 'yamaha') {
+      sendYamahaScaleTuning(updatedTunings, yamahaModel);
+    } else {
+      midiEngine.sendQuarterToneScale(updatedTunings);
+    }
 
     // 2. Recall Sound Button & Switch Bank if needed
     const sndPad = soundsPads.find((p) => p.id === item.soundId);
@@ -1308,24 +1358,24 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
     { note: 'B', label: 'SI', isBlack: false },
   ];
 
-  // Reusable 12-Key Real KORG Scale Box (7 Blue Naturals bottom + 5 Black Sharps overlapping top)
+  // Reusable 12-Key 8K Crystal Scale Box (Blue Crystal Naturals + Obsidian-Black Sharps, Active Liquid Gold -50¢)
   const renderBlueBlackScaleKeys = (heightClass: string, blackHeightClass: string) => (
     <div
       dir="ltr"
-      className={`relative ${heightClass} w-full select-none bg-[#070B14] rounded-xl p-1 border border-[#1E293B] overflow-hidden shadow-inner`}
+      className={`relative ${heightClass} w-full select-none oled-subpanel border-[1.5px] border-white/15 rounded-xl p-1.5 overflow-hidden shadow-[inset_0_3px_12px_rgba(0,0,0,0.95)]`}
     >
       {!isPro && (
         <button
           type="button"
           onClick={() => onRequirePro(isAr ? 'أزرار التشريق اليدوي المباشر' : 'Direct Manual Quarter-Tone Keys')}
-          className="absolute top-1.5 end-1.5 z-20 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#070B14]/90 border border-[#FFB703]/60 text-[#FFB703] text-[9px] font-black shadow"
+          className="absolute top-1.5 end-1.5 z-20 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#030508]/95 border border-[#FACC15]/70 text-[#FFF08A] text-[9px] font-black shadow"
         >
           <Lock className="w-2.5 h-2.5" />
           <span>PRO</span>
         </button>
       )}
 
-      {/* 7 Natural Keys (Blue #2563EB -> #1D4ED8, white text) */}
+      {/* 7 Natural Keys (Crystal Piano Blue -> Active Liquid Gold -50¢) */}
       <div className="flex h-full w-full gap-1">
         {tunerKeys.filter(k => !k.isBlack).map(k => {
           const isTuned = tunings[k.note]?.isQuarterTone;
@@ -1333,22 +1383,25 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
             <button
               key={k.note}
               onClick={() => toggleQuarterNote(k.note)}
-              className={`flex-1 h-full rounded-b-lg rounded-t-sm flex flex-col justify-end pb-1.5 items-center transition-all active:scale-95 ${
+              className={`relative flex-1 h-full rounded-b-lg rounded-t-sm border-[1.5px] flex flex-col justify-end pb-1.5 items-center active-press ${
                 !isPro
-                  ? 'bg-[#1D4ED8]/65 border border-[#3B82F6]/30 text-blue-100/80'
+                  ? 'crystal-piano-blue opacity-70 text-blue-100/80'
                   : isTuned
-                  ? 'bg-gradient-to-b from-[#38BDF8]/30 via-[#2563EB] to-[#1D4ED8] border-2 border-[#FFB703] ring-1 ring-[#FFB703] text-white led-glow-gold'
-                  : 'bg-gradient-to-b from-[#2563EB] to-[#1D4ED8] hover:from-[#3B82F6] hover:to-[#2563EB] border border-[#60A5FA]/40 text-white'
+                  ? 'crystal-piano-gold border-[#FEF9C3] ring-1 ring-[#FACC15] text-[#030508] led-glow-gold'
+                  : 'crystal-piano-blue text-white'
               }`}
             >
+              {isTuned && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 border border-[#030508] shadow-[0_0_6px_#10B981] mb-auto mt-1" />
+              )}
               {!isPro ? (
-                <Lock className="w-2.5 h-2.5 text-[#FFB703] mb-0.5" />
+                <Lock className="w-2.5 h-2.5 text-[#FFF08A] mb-0.5" />
               ) : isTuned ? (
-                <span className="text-[9px] font-mono font-black bg-[#FFB703] text-[#070B14] px-1 rounded mb-0.5 shadow">
+                <span className="text-[9px] font-mono font-black bg-[#030508] text-[#FFF08A] px-1 rounded mb-0.5 shadow">
                   -50
                 </span>
               ) : null}
-              <span className="font-black text-[10px] sm:text-xs font-mono block leading-none text-white">
+              <span className={`font-black text-[10px] sm:text-xs font-mono block leading-none ${isTuned && isPro ? 'text-[#030508]' : 'text-white'}`}>
                 {k.label}
               </span>
             </button>
@@ -1356,8 +1409,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
         })}
       </div>
 
-      {/* 5 Sharp / Flat Keys overlapping at top (Luxury Black #090D16 / #1E293B sheen) */}
-      <div className={`absolute inset-x-1 top-1 ${blackHeightClass} pointer-events-none`}>
+      {/* 5 Sharp / Flat Keys overlapping at top (Obsidian Crystal -> Active Liquid Gold -50¢) */}
+      <div className={`absolute inset-x-1.5 top-1.5 ${blackHeightClass} pointer-events-none`}>
         {[
           { note: 'C#' as NoteName, label: 'DO#', boundary: 1 },
           { note: 'D#' as NoteName, label: 'RE#', boundary: 2 },
@@ -1371,22 +1424,24 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
               key={bk.note}
               onClick={() => toggleQuarterNote(bk.note)}
               style={{ left: `${(bk.boundary / 7) * 100}%`, width: '10.5%' }}
-              className={`pointer-events-auto absolute top-0 -translate-x-1/2 h-full rounded-b-md flex flex-col justify-end pb-1 items-center z-10 transition-all active:scale-95 ${
+              className={`pointer-events-auto absolute top-0 -translate-x-1/2 h-full rounded-b-md border-[1.5px] flex flex-col justify-end pb-1 items-center z-10 active-press ${
                 !isPro
-                  ? 'bg-gradient-to-b from-[#1E293B] to-[#090D16] text-slate-400 border border-[#334155]'
+                  ? 'crystal-piano-obsidian text-slate-400'
                   : isTuned
-                  ? 'bg-gradient-to-b from-[#1E293B] to-[#090D16] text-white border-2 border-[#FFB703] ring-1 ring-[#FFB703] led-glow-gold'
-                  : 'bg-gradient-to-b from-[#1E293B] via-[#090D16] to-[#05080F] hover:from-[#293548] text-slate-100 border-2 border-[#334155] shadow-[0_4px_10px_rgba(0,0,0,0.9)]'
+                  ? 'crystal-piano-gold text-[#030508] border-[#FEF9C3] ring-1 ring-[#FACC15] led-glow-gold'
+                  : 'crystal-piano-obsidian hover:brightness-125 text-slate-100'
               }`}
             >
               {!isPro ? (
-                <Lock className="w-2 h-2 text-[#FFB703] mb-0.5" />
+                <Lock className="w-2 h-2 text-[#FFF08A] mb-0.5" />
               ) : isTuned ? (
-                <span className="text-[8px] font-mono font-black bg-[#FFB703] text-[#070B14] px-0.5 rounded mb-0.5 shadow">
+                <span className="text-[8px] font-mono font-black bg-[#030508] text-[#FFF08A] px-0.5 rounded mb-0.5 shadow">
                   -50
                 </span>
               ) : null}
-              <span className="text-[8px] sm:text-[9px] font-mono font-bold leading-none">{bk.label}</span>
+              <span className={`text-[8px] sm:text-[9px] font-mono font-black leading-none ${isTuned && isPro ? 'text-[#030508]' : 'text-slate-100'}`}>
+                {bk.label}
+              </span>
             </button>
           );
         })}
@@ -1402,20 +1457,24 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           e.preventDefault();
         }
       }}
-      className="stage-smooth-surface space-y-2.5 w-full max-w-[1440px] mx-auto select-none font-sans text-[#F0F6FC]"
+      className="stage-smooth-surface space-y-2.5 w-full max-w-[1440px] mx-auto select-none font-sans text-[#F8FAFC]"
     >
       
-      {/* Slim Top Control Bar (Preserved completely intact) */}
-      <div className={`bg-[#0B1120] border ${theme.panelBorder} ${theme.glowBox} rounded-xl px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shadow-lg transition-colors`}>
+      {/* Slim Top Control Bar */}
+      <div className={`oled-metal-panel border ${theme.panelBorder} ${theme.glowBox} rounded-xl px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 transition-colors`}>
         
         {/* Left: Brand & Transpose */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="flex items-center gap-1.5">
-            <div className={`w-6 h-6 rounded-md bg-[#070B14] border ${theme.panelBorder} flex items-center justify-center text-[11px] ${theme.secondaryAccentText} font-black`}>
+            <div className={`w-6 h-6 rounded-md bg-[#05070B] border ${theme.panelBorder} flex items-center justify-center text-[11px] ${theme.secondaryAccentText} font-black`}>
               &lt;
             </div>
-            <span className="text-xs sm:text-sm font-black tracking-wider text-[#F0F6FC] font-mono">
-              ARAB SCALE <span className={theme.accentText}>PRO</span>
+            <span className="text-xs sm:text-sm font-black tracking-wider text-[#F8FAFC] font-mono">
+              {activeBrand === 'yamaha' ? (
+                <>YAMAHA <span className={theme.accentText}>PRO</span></>
+              ) : (
+                <>KORG &amp; YAMAHA <span className={theme.accentText}>PRO</span></>
+              )}
             </span>
           </div>
 
@@ -1586,7 +1645,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
       </div>
 
       {/* Compact Stage Performance Bar: Maqam Drone (Ch 3) & Next Song Setlist Control */}
-      <div className={`bg-[#0B1120] border ${theme.panelBorder} rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 shadow-md`}>
+      <div className={`oled-metal-panel border ${theme.panelBorder} rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2`}>
         {/* Maqam Drone Pill */}
         <div className="flex flex-wrap items-center gap-1.5">
           <button
@@ -1674,7 +1733,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
         <div dir="ltr" className="grid grid-cols-12 gap-2.5 items-stretch">
 
           {/* LEFT COLUMN: SOUNDS (أزرار الأصوات B1-B16) */}
-          <div className={`col-span-4 bg-[#0B1120] border ${soundTheme.panelBorder} ${soundTheme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between shadow-2xl space-y-2 transition-colors`}>
+          <div className={`col-span-4 oled-metal-panel border ${soundTheme.panelBorder} ${soundTheme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between space-y-2 transition-colors`}>
             <div className={`flex items-center justify-between pb-1.5 border-b ${soundTheme.panelBorder}`}>
               <span className={`font-mono font-black text-xs ${soundTheme.accentText} uppercase tracking-wider flex items-center gap-1.5`}>
                 <Music className={`w-3.5 h-3.5 ${soundTheme.accentText}`} />
@@ -1687,7 +1746,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                   className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold flex items-center gap-1 transition-all ${
                     isBankColorPickerOpen
                       ? 'bg-white/15 border-white/60 text-white'
-                      : 'bg-[#111827] border-[#1E293B] text-slate-300 hover:border-slate-500'
+                      : 'bg-[#090D16] border-[#334155] text-slate-300 hover:border-slate-500'
                   }`}
                   title={isAr ? `تلوين بنك B${activeSoundBank}` : `Pick color for Bank B${activeSoundBank}`}
                 >
@@ -1695,19 +1754,23 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     className={`w-2.5 h-2.5 rounded-full border border-white/60 ${
                       bankColors[activeSoundBank]
                         ? BANK_COLOR_PALETTE[bankColors[activeSoundBank]].dotClass
-                        : 'bg-amber-400'
+                        : 'bg-[#FDE047]'
                     }`}
                   />
                   <Palette className="w-2.5 h-2.5" />
                 </button>
                 <span className="text-[10px] font-mono text-slate-400">
-                  {keyboardMode === 'kronos' ? 'Ch 1 · Prog' : 'Ch 16 · Perf'}
+                  {activeBrand === 'yamaha'
+                    ? `XG · Ch${channels.upper1 || 1}`
+                    : keyboardMode === 'kronos'
+                    ? 'Ch 1 · Prog'
+                    : 'Ch 16 · Perf'}
                 </span>
               </div>
             </div>
 
             {isBankColorPickerOpen && (
-              <div className="flex flex-wrap items-center justify-between gap-1 bg-[#070B14] border border-[#1E293B] rounded-lg px-2 py-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-1 bg-[#05070B] border border-[#1F2937] rounded-lg px-2 py-1.5">
                 <span className="text-[9px] font-bold text-slate-300">
                   {isAr ? `لون B${activeSoundBank}:` : `B${activeSoundBank} Color:`}
                 </span>
@@ -1730,7 +1793,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setCustomBankColor(activeSoundBank, null)}
-                      className="px-1.5 py-0.5 rounded bg-[#111827] border border-[#30363D] text-[9px] text-slate-300 hover:text-white"
+                      className="px-1.5 py-0.5 rounded bg-[#090D16] border border-[#334155] text-[9px] text-slate-300 hover:text-white"
                       title={isAr ? 'استعادة الافتراضي' : 'Reset'}
                     >
                       ↺
@@ -1750,16 +1813,23 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     key={`snd_bank_l_${bankNum}`}
                     type="button"
                     onClick={() => setActiveSoundBank(bankNum)}
-                    className={`relative py-1 rounded-md font-mono font-black text-[10px] border transition-all active:scale-95 ${
+                    className={`relative py-1 rounded-md font-mono font-black text-[10px] border active-press ${
                       customColor
                         ? isSelected
                           ? customColor.tabActive
                           : customColor.tabInactive
                         : isSelected
-                        ? soundTheme.pillActive
-                        : 'bg-[#111827] text-slate-300 hover:bg-[#1E293B] border-[#1E293B]'
+                        ? `${soundTheme.pillActive} font-black`
+                        : 'hardware-keycap-dark text-slate-300 hover:text-[#FDE047]'
                     }`}
                   >
+                    <span
+                      className={`absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full ${
+                        isSelected
+                          ? 'bg-emerald-400 border border-[#05070B] shadow-[0_0_6px_#10B981]'
+                          : 'bg-slate-600/40'
+                      }`}
+                    />
                     B{bankNum}
                   </button>
                 );
@@ -1789,19 +1859,28 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       }
                       handlePadClick(pad);
                     }}
-                    className={`relative ${landscapeBtnSize} rounded-xl flex flex-col justify-between items-center text-center transition-all active:scale-95 ${getPadButtonClasses(pad, isActive)} ${isLocked ? 'opacity-75' : ''}`}
+                    className={`relative ${landscapeBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isActive)} ${isLocked ? 'opacity-75' : ''}`}
                   >
+                    <span
+                      className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
+                        isActive
+                          ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]'
+                          : 'bg-[#05070B]/35'
+                      }`}
+                    />
                     {isLocked && (
-                      <span className="absolute top-0.5 end-0.5 inline-flex items-center gap-0.5 px-1 rounded bg-[#070B14] border border-[#FFB703]/60 text-[#FFB703] text-[7px] font-black shadow">
+                      <span className="absolute top-0.5 end-0.5 inline-flex items-center gap-0.5 px-1 rounded bg-[#05070B] border border-[#FDE047]/60 text-[#FDE047] text-[7px] font-black shadow">
                         <Lock className="w-2 h-2" />
                         PRO
                       </span>
                     )}
-                    <span className={`font-bold ${btnFonts.title} tracking-wide truncate w-full text-center leading-tight mt-0.5 ${txtColor}`}>
+                    <span className={`font-black ${btnFonts.title} tracking-wide truncate w-full text-center leading-tight mt-0.5 ${txtColor}`}>
                       {pad.name}
                     </span>
-                    <span className={`${btnFonts.subtitle} font-mono uppercase tracking-wider font-bold ${txtColor}`}>
-                      {keyboardMode === 'kronos'
+                    <span className={`${btnFonts.subtitle} font-mono uppercase tracking-wider font-bold opacity-85 ${txtColor}`}>
+                      {activeBrand === 'yamaha'
+                        ? `B${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · XG`
+                        : keyboardMode === 'kronos'
                         ? `B${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · Ch1`
                         : `B${pad.bankNumber ?? pad.lsb} · P${perfNum} · Ch16`}
                     </span>
@@ -1819,7 +1898,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     midiEngine.sendSTS(sts as any);
                     showToast(`STS ${sts}`);
                   }}
-                  className={`flex-1 py-1 rounded-lg bg-[#111827] hover:bg-[#1E293B] ${theme.secondaryAccentText} font-bold border ${theme.panelBorder} text-center active:scale-95`}
+                  className={`flex-1 py-1 rounded-lg hardware-keycap-dark hover:border-[#FDE047]/50 ${theme.secondaryAccentText} font-bold text-center active-press`}
                 >
                   STS {sts}
                 </button>
@@ -1828,7 +1907,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           </div>
 
           {/* CENTER COLUMN: REAL BLUE/BLACK SCALE BOX & MAQAM PRESETS */}
-          <div className={`col-span-4 bg-[#0B1120] border ${theme.panelBorder} ${theme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between shadow-2xl space-y-1.5 transition-colors`}>
+          <div className={`col-span-4 oled-metal-panel border ${theme.panelBorder} ${theme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between space-y-1.5 transition-colors`}>
             {/* LCD Readout + Quick Hear/Send/Reset */}
             <div className={`bg-[#070B14] border ${theme.panelBorder} rounded-xl py-1 px-2 flex items-center justify-between gap-1 text-xs`}>
               <span className={`text-[10px] font-mono ${theme.accentText} font-bold truncate`}>
@@ -1997,7 +2076,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           </div>
 
           {/* RIGHT COLUMN: STYLES (أزرار الإيقاعات) */}
-          <div className={`col-span-4 bg-[#0B1120] border ${styleTheme.panelBorder} ${styleTheme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between shadow-2xl space-y-2 transition-colors`}>
+          <div className={`col-span-4 oled-metal-panel border ${styleTheme.panelBorder} ${styleTheme.glowBox} rounded-2xl p-2.5 flex flex-col justify-between space-y-2 transition-colors`}>
             <div className={`flex items-center justify-between pb-1.5 border-b ${styleTheme.panelBorder}`}>
               <span className={`font-mono font-black text-xs ${styleTheme.accentText} uppercase tracking-wider flex items-center gap-1.5`}>
                 <Radio className={`w-3.5 h-3.5 ${styleTheme.accentText}`} />
@@ -2008,14 +2087,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                   const next = !isPlayingRhythm;
                   if (next) stopMaqamDrone(true);
                   setIsPlayingRhythm(next);
-                  midiEngine.sendArrangerCommand(next ? 'start' : 'stop');
+                  if (activeBrand === 'yamaha') {
+                    sendYamahaStyleStartStop(next ? 'start' : 'stop', yamahaModel);
+                  } else {
+                    midiEngine.sendArrangerCommand(next ? 'start' : 'stop');
+                  }
                 }}
-                className={`px-2 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1 border ${
+                className={`px-3 py-1 rounded-lg text-[10px] font-black flex items-center gap-1.5 border-[1.5px] active-press text-white ${
                   isPlayingRhythm
-                    ? 'bg-red-600 border-red-300 text-white'
-                    : 'bg-emerald-600 border-emerald-400 text-white'
+                    ? 'crystal-ruby-jewel-active animate-pulse'
+                    : 'crystal-ruby-jewel'
                 }`}
               >
+                <span className={`w-1.5 h-1.5 rounded-full ${isPlayingRhythm ? 'bg-white shadow-[0_0_6px_#fff]' : 'bg-rose-200/80'}`} />
                 {isPlayingRhythm ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
                 <span>{isPlayingRhythm ? 'STOP' : 'START'}</span>
               </button>
@@ -2030,12 +2114,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     key={`sty_bank_l_${bankNum}`}
                     type="button"
                     onClick={() => setActiveStyleBank(bankNum)}
-                    className={`py-1 rounded-md font-mono font-black text-[10px] border transition-all active:scale-95 ${
+                    className={`relative py-1 rounded-md font-mono font-black text-[10px] border active-press ${
                       isSelected
-                        ? styleTheme.pillActive
-                        : 'bg-[#111827] text-slate-300 hover:bg-[#1E293B] border-[#1E293B]'
+                        ? `${styleTheme.pillActive} font-black`
+                        : 'hardware-keycap-dark text-slate-300 hover:text-white'
                     }`}
                   >
+                    <span
+                      className={`absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full ${
+                        isSelected
+                          ? 'bg-emerald-400 border border-[#05070B] shadow-[0_0_6px_#10B981]'
+                          : 'bg-slate-600/40'
+                      }`}
+                    />
                     B{bankNum}
                   </button>
                 );
@@ -2062,12 +2153,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       }
                       handlePadClick(pad);
                     }}
-                    className={`relative ${landscapeBtnSize} rounded-xl flex flex-col justify-between items-center text-center transition-all active:scale-95 ${getPadButtonClasses(pad, isActive)}`}
+                    className={`relative ${landscapeBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isActive)}`}
                   >
-                    <span className={`font-bold ${btnFonts.title} tracking-wide truncate w-full text-center leading-tight mt-0.5 ${txtColor}`}>
+                    <span
+                      className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
+                        isActive
+                          ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]'
+                          : 'bg-[#05070B]/35'
+                      }`}
+                    />
+                    <span className={`font-black ${btnFonts.title} tracking-wide truncate w-full text-center leading-tight mt-0.5 ${txtColor}`}>
                       {pad.name}
                     </span>
-                    <span className={`${btnFonts.subtitle} font-mono uppercase tracking-wider font-bold ${txtColor}`}>
+                    <span className={`${btnFonts.subtitle} font-mono uppercase tracking-wider font-bold opacity-85 ${txtColor}`}>
                       {pad.messageType === 'pc_only' ? `PC · ${pad.pc}` : `STY · ${pad.pc}`}
                     </span>
                   </button>
@@ -2075,26 +2173,44 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
               })}
             </div>
 
-            {/* Variations */}
+            {/* Variations / Main A-D (Sapphire Crystal Glow) & Break (Cyan Crystal Glow) */}
             <div className={`pt-1.5 border-t ${theme.panelBorder} flex items-center justify-between gap-1 text-[10px] font-mono`}>
-              {[1, 2, 3, 4].map(v => (
-                <button
-                  key={v}
-                  onClick={() => {
-                    midiEngine.sendStyleElement('variation', v as any);
-                    showToast(`Variation ${v}`);
-                  }}
-                  className="flex-1 py-1 rounded-lg bg-[#111827] hover:bg-[#1E293B] text-slate-200 font-bold border border-[#1E293B] hover:border-[#FFB703]/60 text-center active:scale-95"
-                >
-                  V{v}
-                </button>
-              ))}
+              {([1, 2, 3, 4] as const).map(v => {
+                const isVarActive = activeVariation === v;
+                const varLabel = activeBrand === 'yamaha' ? ['A', 'B', 'C', 'D'][v - 1] : `V${v}`;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => {
+                      setActiveVariation(v);
+                      if (activeBrand === 'yamaha') {
+                        sendYamahaStyleControl('variation', v, yamahaModel);
+                        showToast(`Main ${['A', 'B', 'C', 'D'][v - 1]}`);
+                      } else {
+                        midiEngine.sendStyleElement('variation', v);
+                        showToast(`Variation ${v}`);
+                      }
+                    }}
+                    className={`relative flex-1 py-1 rounded-lg font-black border-[1.5px] text-center active-press ${
+                      isVarActive
+                        ? 'crystal-sapphire-jewel-active text-[#030508]'
+                        : 'crystal-sapphire-jewel text-sky-100'
+                    }`}
+                  >
+                    {varLabel}
+                  </button>
+                );
+              })}
               <button
                 onClick={() => {
-                  midiEngine.sendStyleElement('break', 1);
+                  if (activeBrand === 'yamaha') {
+                    sendYamahaStyleControl('break', 1, yamahaModel);
+                  } else {
+                    midiEngine.sendStyleElement('break', 1);
+                  }
                   showToast('Break');
                 }}
-                className="px-2 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-900 text-rose-200 font-bold border border-rose-700/60 text-center active:scale-95"
+                className="px-2.5 py-1 rounded-lg crystal-cyan-jewel text-cyan-100 font-black border-[1.5px] text-center active-press shadow"
               >
                 BRK
               </button>
@@ -2110,10 +2226,10 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
         <div className="space-y-3 max-w-lg mx-auto">
           
           {/* Vertical Phone Section Switcher */}
-          <div className={`grid grid-cols-3 gap-1.5 p-1 bg-[#0B1120] rounded-xl border ${theme.panelBorder}`}>
+          <div className={`grid grid-cols-3 gap-1.5 p-1 oled-metal-panel rounded-xl border ${theme.panelBorder}`}>
             <button
               onClick={() => setPortraitSection('sounds')}
-              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all border ${
+              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 active-press border ${
                 portraitSection === 'sounds'
                   ? `${soundTheme.pillActive} font-black`
                   : 'border-transparent text-slate-400 hover:text-white'
@@ -2125,7 +2241,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
 
             <button
               onClick={() => setPortraitSection('styles')}
-              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all border ${
+              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 active-press border ${
                 portraitSection === 'styles'
                   ? `${styleTheme.pillActive} font-black`
                   : 'border-transparent text-slate-400 hover:text-white'
@@ -2137,9 +2253,9 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
 
             <button
               onClick={() => setPortraitSection('all')}
-              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+              className={`py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 active-press ${
                 portraitSection === 'all'
-                  ? 'bg-[#2563EB] text-white font-black shadow-[0_0_12px_rgba(37,99,235,0.5)]'
+                  ? 'hardware-keycap-blue text-white font-black led-glow-cyan'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -2149,16 +2265,16 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           </div>
 
           {/* Sound / Style Button Matrix */}
-          <div className={`bg-[#0B1120] border ${
+          <div className={`oled-metal-panel border ${
             portraitSection === 'sounds'
               ? `${soundTheme.panelBorder} ${soundTheme.glowBox}`
               : portraitSection === 'styles'
               ? `${styleTheme.panelBorder} ${styleTheme.glowBox}`
               : `${theme.panelBorder} ${theme.glowBox}`
-          } rounded-2xl p-3 shadow-xl space-y-2 transition-colors`}>
+          } rounded-2xl p-3 space-y-2 transition-colors`}>
             
             <div className={`flex items-center justify-between text-xs pb-1.5 border-b ${theme.panelBorder}`}>
-              <span className="font-bold text-[#F0F6FC] flex items-center gap-1.5">
+              <span className="font-bold text-[#F8FAFC] flex items-center gap-1.5">
                 {portraitSection === 'sounds' ? (
                   <>
                     <Music className={`w-3.5 h-3.5 ${soundTheme.accentText}`} />
@@ -2185,7 +2301,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     className={`px-2 py-1 rounded-md border text-[10px] font-bold flex items-center gap-1 transition-all ${
                       isBankColorPickerOpen
                         ? 'bg-white/15 border-white/60 text-white'
-                        : 'bg-[#111827] border-[#1E293B] text-slate-300 hover:border-slate-500'
+                        : 'bg-[#090D16] border-[#334155] text-slate-300 hover:border-slate-500'
                     }`}
                     title={isAr ? `تلوين بنك B${activeSoundBank}` : `Color Bank B${activeSoundBank}`}
                   >
@@ -2193,7 +2309,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       className={`w-2.5 h-2.5 rounded-full border border-white/60 ${
                         bankColors[activeSoundBank]
                           ? BANK_COLOR_PALETTE[bankColors[activeSoundBank]].dotClass
-                          : 'bg-amber-400'
+                          : 'bg-[#FDE047]'
                       }`}
                     />
                     <Palette className="w-3 h-3" />
@@ -2207,14 +2323,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       const next = !isPlayingRhythm;
                       if (next) stopMaqamDrone(true);
                       setIsPlayingRhythm(next);
-                      midiEngine.sendArrangerCommand(next ? 'start' : 'stop');
+                      if (activeBrand === 'yamaha') {
+                        sendYamahaStyleStartStop(next ? 'start' : 'stop', yamahaModel);
+                      } else {
+                        midiEngine.sendArrangerCommand(next ? 'start' : 'stop');
+                      }
                     }}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 border ${
+                    className={`px-3 py-1 rounded-lg text-[11px] font-black flex items-center gap-1.5 border-[1.5px] active-press text-white ${
                       isPlayingRhythm
-                        ? 'bg-red-600 border-red-300 text-white'
-                        : 'bg-emerald-600 border-emerald-400 text-white'
+                        ? 'crystal-ruby-jewel-active animate-pulse'
+                        : 'crystal-ruby-jewel'
                     }`}
                   >
+                    <span className={`w-1.5 h-1.5 rounded-full ${isPlayingRhythm ? 'bg-white shadow-[0_0_6px_#fff]' : 'bg-rose-200/80'}`} />
                     {isPlayingRhythm ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
                     <span>{isPlayingRhythm ? 'STOP' : 'START'}</span>
                   </button>
@@ -2223,7 +2344,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
             </div>
 
             {isBankColorPickerOpen && (portraitSection === 'sounds' || portraitSection === 'all') && (
-              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#070B14] border border-[#1E293B] rounded-lg px-2.5 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#05070B] border border-[#1F2937] rounded-lg px-2.5 py-2">
                 <span className="text-[11px] font-bold text-slate-200">
                   {isAr ? `لون بنك الأصوات B${activeSoundBank}:` : `Sound Bank B${activeSoundBank} Color:`}
                 </span>
@@ -2246,7 +2367,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setCustomBankColor(activeSoundBank, null)}
-                      className="px-2 py-0.5 rounded bg-[#111827] border border-[#30363D] text-[10px] font-bold text-slate-300 hover:text-white"
+                      className="px-2 py-0.5 rounded bg-[#090D16] border border-[#334155] text-[10px] font-bold text-slate-300 hover:text-white"
                     >
                       {isAr ? 'افتراضي' : 'Reset'}
                     </button>
@@ -2266,16 +2387,23 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       key={`p_snd_bank_${bankNum}`}
                       type="button"
                       onClick={() => setActiveSoundBank(bankNum)}
-                      className={`py-1.5 rounded-lg font-mono font-black text-[11px] border transition-all active:scale-95 ${
+                      className={`relative py-1.5 rounded-lg font-mono font-black text-[11px] border active-press ${
                         customColor
                           ? isSelected
                             ? customColor.tabActive
                             : customColor.tabInactive
                           : isSelected
-                          ? soundTheme.pillActive
-                          : 'bg-[#111827] text-slate-300 hover:bg-[#1E293B] border-[#1E293B]'
+                          ? `${soundTheme.pillActive} font-black`
+                          : 'hardware-keycap-dark text-slate-300 hover:text-[#FDE047]'
                       }`}
                     >
+                      <span
+                        className={`absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full ${
+                          isSelected
+                            ? 'bg-emerald-400 border border-[#05070B] shadow-[0_0_6px_#10B981]'
+                            : 'bg-slate-600/40'
+                        }`}
+                      />
                       B{bankNum}
                     </button>
                   );
@@ -2292,12 +2420,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       key={`p_sty_bank_${bankNum}`}
                       type="button"
                       onClick={() => setActiveStyleBank(bankNum)}
-                      className={`py-1.5 rounded-lg font-mono font-black text-[11px] border transition-all active:scale-95 ${
+                      className={`relative py-1.5 rounded-lg font-mono font-black text-[11px] border active-press ${
                         isSelected
-                          ? styleTheme.pillActive
-                          : 'bg-[#111827] text-slate-300 hover:bg-[#1E293B] border-[#1E293B]'
+                          ? `${styleTheme.pillActive} font-black`
+                          : 'hardware-keycap-dark text-slate-300 hover:text-white'
                       }`}
                     >
+                      <span
+                        className={`absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full ${
+                          isSelected
+                            ? 'bg-emerald-400 border border-[#05070B] shadow-[0_0_6px_#10B981]'
+                            : 'bg-slate-600/40'
+                        }`}
+                      />
                       {isAr ? `بنك ${bankNum}` : `B${bankNum}`}
                     </button>
                   );
@@ -2307,7 +2442,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
 
             {portraitSection === 'all' && (
               <div className="space-y-1.5">
-                <div dir="ltr" className="bg-[#070B14] border border-[#1E293B] rounded-lg p-1.5 space-y-1">
+                <div dir="ltr" className="oled-subpanel rounded-lg p-1.5 space-y-1">
                   <div className="flex items-center justify-between text-[9px] font-black px-0.5">
                     <span className={soundTheme.accentText}>SOUNDS BANKS (B1–B16)</span>
                     <span className="text-slate-400 font-mono">B{activeSoundBank}</span>
@@ -2321,39 +2456,47 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                           key={`all_snd_b_${b}`}
                           type="button"
                           onClick={() => setActiveSoundBank(b)}
-                          className={`py-1 rounded font-mono font-black text-[9px] border transition-all ${
+                          className={`relative py-1 rounded font-mono font-black text-[9px] border active-press ${
                             customColor
                               ? isSel
                                 ? customColor.tabActive
                                 : customColor.tabInactive
                               : isSel
-                              ? soundTheme.pillActive
-                              : 'bg-[#111827] text-slate-400 border-transparent'
+                              ? `${soundTheme.pillActive} font-black`
+                              : 'hardware-keycap-dark text-slate-300'
                           }`}
                         >
+                          <span
+                            className={`absolute top-0.5 end-0.5 w-1 h-1 rounded-full ${
+                              isSel ? 'bg-emerald-400 shadow-[0_0_5px_#10B981]' : 'bg-slate-600/40'
+                            }`}
+                          />
                           B{b}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 bg-[#070B14] border border-[#1E293B] rounded-lg p-1">
+                <div className="flex items-center gap-1 oled-subpanel rounded-lg p-1">
                   <span className={`text-[9px] font-black px-1 ${styleTheme.accentText}`}>STY</span>
                   <div className="grid grid-cols-6 gap-0.5 flex-1">
-                    {[1, 2, 3, 4, 5, 6].map((b) => (
-                      <button
-                        key={`all_sty_b_${b}`}
-                        type="button"
-                        onClick={() => setActiveStyleBank(b)}
-                        className={`py-0.5 rounded font-mono font-black text-[9px] border ${
-                          activeStyleBank === b
-                            ? styleTheme.pillActive
-                            : 'bg-[#111827] text-slate-400 border-transparent'
-                        }`}
-                      >
-                        B{b}
-                      </button>
-                    ))}
+                    {[1, 2, 3, 4, 5, 6].map((b) => {
+                      const isSel = activeStyleBank === b;
+                      return (
+                        <button
+                          key={`all_sty_b_${b}`}
+                          type="button"
+                          onClick={() => setActiveStyleBank(b)}
+                          className={`relative py-0.5 rounded font-mono font-black text-[9px] border active-press ${
+                            isSel
+                              ? styleTheme.pillActive
+                              : 'hardware-keycap-dark text-slate-300'
+                          }`}
+                        >
+                          B{b}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -2382,19 +2525,28 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         }
                         handlePadClick(pad);
                       }}
-                      className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center transition-all active:scale-95 ${getPadButtonClasses(pad, isActive)} ${isLocked ? 'opacity-75' : ''}`}
+                      className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isActive)} ${isLocked ? 'opacity-75' : ''}`}
                     >
+                      <span
+                        className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
+                          isActive
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]'
+                            : 'bg-[#05070B]/35'
+                        }`}
+                      />
                       {isLocked && (
-                        <span className="absolute top-1 end-1 inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-[#070B14] border border-[#FFB703]/60 text-[#FFB703] text-[8px] font-black shadow">
+                        <span className="absolute top-1 end-1 inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-[#05070B] border border-[#FDE047]/60 text-[#FDE047] text-[8px] font-black shadow">
                           <Lock className="w-2 h-2" />
                           PRO
                         </span>
                       )}
-                      <span className={`font-bold ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
+                      <span className={`font-black ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
                         {pad.name}
                       </span>
-                      <span className={`${btnFonts.subtitle} font-mono font-bold ${txtColor}`}>
-                        {keyboardMode === 'kronos'
+                      <span className={`${btnFonts.subtitle} font-mono font-bold opacity-85 ${txtColor}`}>
+                        {activeBrand === 'yamaha'
+                          ? `Bank ${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · XG`
+                          : keyboardMode === 'kronos'
                           ? `Bank ${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · Ch1`
                           : `Bank ${pad.bankNumber ?? pad.lsb} · Perf ${perfNum} · Ch16`}
                       </span>
@@ -2422,12 +2574,19 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         }
                         handlePadClick(pad);
                       }}
-                      className={`${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center transition-all active:scale-95 ${getPadButtonClasses(pad, isActive)}`}
+                      className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isActive)}`}
                     >
-                      <span className={`font-bold ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
+                      <span
+                        className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
+                          isActive
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]'
+                            : 'bg-[#05070B]/35'
+                        }`}
+                      />
+                      <span className={`font-black ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
                         {pad.name}
                       </span>
-                      <span className={`${btnFonts.subtitle} font-mono font-bold ${txtColor}`}>
+                      <span className={`${btnFonts.subtitle} font-mono font-bold opacity-85 ${txtColor}`}>
                         {pad.messageType === 'pc_only' ? `PC · ${pad.pc}` : `STY · ${pad.pc}`}
                       </span>
                     </button>
@@ -2457,20 +2616,29 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         }
                         handlePadClick(pad);
                       }}
-                      className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center transition-all active:scale-95 ${getPadButtonClasses(pad, isCurrent)} ${isLocked ? 'opacity-75' : ''}`}
+                      className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isCurrent)} ${isLocked ? 'opacity-75' : ''}`}
                     >
+                      <span
+                        className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
+                          isCurrent
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]'
+                            : 'bg-[#05070B]/35'
+                        }`}
+                      />
                       {isLocked && (
-                        <span className="absolute top-1 end-1 inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-[#070B14] border border-[#FFB703]/60 text-[#FFB703] text-[8px] font-black shadow">
+                        <span className="absolute top-1 end-1 inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-[#05070B] border border-[#FDE047]/60 text-[#FDE047] text-[8px] font-black shadow">
                           <Lock className="w-2 h-2" />
                           PRO
                         </span>
                       )}
-                      <span className={`font-bold ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
+                      <span className={`font-black ${btnFonts.title} tracking-wide truncate w-full ${txtColor}`}>
                         {pad.name}
                       </span>
-                      <span className={`${btnFonts.subtitle} font-mono font-bold ${txtColor} uppercase`}>
+                      <span className={`${btnFonts.subtitle} font-mono font-bold opacity-85 ${txtColor} uppercase`}>
                         {pad.type === 'sound'
-                          ? keyboardMode === 'kronos'
+                          ? activeBrand === 'yamaha'
+                            ? `B${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · XG`
+                            : keyboardMode === 'kronos'
                             ? `B${pad.bankNumber ?? pad.lsb} · PC ${perfNum - 1} · Ch1`
                             : `B${pad.bankNumber ?? pad.lsb} · P${perfNum} · Ch16`
                           : pad.messageType === 'pc_only'
@@ -2486,7 +2654,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           </div>
 
           {/* Real Blue/Black Scale Box & Presets in Vertical Mode */}
-          <div className={`bg-[#0B1120] border ${theme.panelBorder} ${theme.glowBox} rounded-2xl p-3 shadow-xl space-y-2.5 transition-colors`}>
+          <div className={`oled-metal-panel border ${theme.panelBorder} ${theme.glowBox} rounded-2xl p-3 space-y-2.5 transition-colors`}>
             <div className={`flex flex-wrap items-center justify-between gap-2 text-xs pb-1.5 border-b ${theme.panelBorder}`}>
               <div className="flex flex-col">
                 <span className="font-bold text-slate-200">
@@ -2688,8 +2856,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
         };
 
         return (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4">
-          <div className="bg-[#0B1120] border border-[#1E293B] rounded-2xl p-4 sm:p-5 max-w-xl w-full max-h-[92vh] overflow-y-auto shadow-2xl space-y-3.5">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4">
+          <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-5 max-w-xl w-full max-h-[92vh] overflow-y-auto shadow-2xl space-y-3.5">
 
             <div className="flex items-center justify-between pb-2 border-b border-[#1E293B]">
               <h3 className="font-bold text-[#F0F6FC] text-base flex items-center gap-2">
@@ -3189,8 +3357,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
 
       {/* Live Stage Setlist Manager Modal */}
       {isSetlistModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-[#0B1120] border border-[#1E293B] rounded-2xl p-4 sm:p-5 max-w-md w-full max-h-[88vh] overflow-y-auto shadow-2xl space-y-3.5 text-xs">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-5 max-w-md w-full max-h-[88vh] overflow-y-auto shadow-2xl space-y-3.5 text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-[#1E293B]">
               <h3 className="font-black text-[#F0F6FC] text-sm flex items-center gap-2">
                 <ListMusic className="w-4 h-4 text-[#38BDF8]" />

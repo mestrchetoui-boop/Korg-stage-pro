@@ -196,17 +196,18 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
   const currentSemitones = pitchBend * pbRange;
 
   return (
-    <div className={`w-full bg-[#0B1120] rounded-xl border border-[#1E293B] select-none ${compact ? 'px-2.5 py-2 space-y-1.5' : 'px-3.5 py-3 space-y-2.5'}`}>
+    <div className={`w-full oled-metal-panel rounded-xl border-[1.5px] border-white/15 select-none ${compact ? 'px-2.5 py-2 space-y-1.5' : 'px-3.5 py-3 space-y-2.5'}`}>
 
-      {/* 1. Upgraded Oriental Pitch Bend / Ribbon Controller */}
+      {/* 1. Upgraded Machined-Metal Crystal Pitch Bend / Ribbon Controller */}
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
         <div className="flex flex-wrap items-center justify-between text-xs gap-1.5">
-          <span className="font-bold text-[#FFB703] flex items-center gap-1.5">
+          <span className="font-bold text-[#FFF08A] flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${Math.abs(pitchBend) > 0.02 ? 'bg-[#38BDF8] shadow-[0_0_8px_#38BDF8]' : 'bg-[#FACC15] shadow-[0_0_6px_#FACC15]'}`} />
             <MoveHorizontal className="w-3.5 h-3.5" />
             <span>
               {wheelMode === 'ribbon'
                 ? (isAr ? 'شريط البيتش ريبون (Ribbon Hold)' : 'Oriental Ribbon (Hold)')
-                : (isAr ? 'بيتش بيند زنبركي (Spring Pitch Bend)' : 'Oriental Pitch Bend (Spring)')}
+                : (isAr ? 'عجلة البيتش المعدنية (Spring Pitch)' : 'Hardware Pitch Wheel (Spring)')}
             </span>
           </span>
 
@@ -214,10 +215,10 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
             {/* Pitch Bend Range Selector (±2, ±5, ±12 semitones) via MIDI RPN */}
             <div
               dir="ltr"
-              className="inline-flex items-center rounded-md overflow-hidden border border-[#1E293B] bg-[#070B14] text-[10px] font-mono font-black"
+              className="inline-flex items-center rounded-lg overflow-hidden border-[1.5px] border-white/15 bg-[#030508] text-[10px] font-mono font-black shadow-inner"
               title={isAr ? 'مدى البيتش بيند (يرسل RPN CC101/100/6/38 على القناة 1)' : 'Pitch Bend Range (sends RPN on Ch 1)'}
             >
-              <span className="px-1.5 py-0.5 text-slate-500 border-e border-[#1E293B]">RNG</span>
+              <span className="px-1.5 py-0.5 text-slate-500 border-e border-white/10">RNG</span>
               {PITCH_BEND_RANGES.map((rng) => (
                 <button
                   key={rng}
@@ -225,7 +226,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                   onClick={() => handleSelectPbRange(rng)}
                   className={`px-2 py-0.5 transition-colors ${
                     pbRange === rng
-                      ? 'bg-[#38BDF8] text-[#070B14]'
+                      ? 'crystal-sapphire-jewel-active text-[#030508]'
                       : 'text-slate-300 hover:text-white hover:bg-[#111827]'
                   }`}
                 >
@@ -235,7 +236,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
             </div>
 
             {/* Spring / Ribbon Mode Toggle */}
-            <div dir="ltr" className="inline-flex rounded-md overflow-hidden border border-[#1E293B] bg-[#070B14] text-[10px] font-mono font-black">
+            <div dir="ltr" className="inline-flex rounded-lg overflow-hidden border-[1.5px] border-white/15 bg-[#030508] text-[10px] font-mono font-black shadow-inner">
               <button
                 type="button"
                 onClick={() => {
@@ -244,7 +245,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                 }}
                 className={`px-2.5 py-0.5 transition-colors ${
                   wheelMode === 'pitch'
-                    ? 'bg-[#FFB703] text-[#070B14]'
+                    ? 'hardware-keycap-gold text-[#030508]'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -255,7 +256,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                 onClick={() => setWheelMode('ribbon')}
                 className={`px-2.5 py-0.5 transition-colors ${
                   wheelMode === 'ribbon'
-                    ? 'bg-[#38BDF8] text-[#070B14]'
+                    ? 'crystal-sapphire-jewel-active text-[#030508]'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -267,10 +268,10 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
             <button
               type="button"
               onClick={snapPitchToZero}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono font-black border flex items-center gap-1 active:scale-95 transition-colors ${
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-black border flex items-center gap-1 active-press ${
                 wheelMode === 'ribbon' || Math.abs(pitchBend) > 0.01
-                  ? 'bg-sky-500/20 hover:bg-sky-500/30 border-[#38BDF8]/70 text-[#38BDF8]'
-                  : 'bg-[#070B14] hover:bg-[#111827] border-[#1E293B] text-slate-300 hover:text-white'
+                  ? 'bg-sky-500/20 hover:bg-sky-500/30 border-[#38BDF8]/80 text-[#38BDF8] shadow-[0_0_10px_rgba(56,189,248,0.25)]'
+                  : 'hardware-keycap-dark border-[#334155] text-slate-300 hover:text-white'
               }`}
             >
               <RotateCcw className="w-2.5 h-2.5" />
@@ -284,10 +285,10 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
               disabled={wheelMode === 'ribbon'}
               className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-all ${
                 wheelMode === 'ribbon'
-                  ? 'bg-[#070B14] border-[#1E293B] text-slate-600 cursor-not-allowed'
+                  ? 'bg-[#05070B] border-[#1F2937] text-slate-600 cursor-not-allowed'
                   : returnSpeed === 'fast'
-                  ? 'bg-[#111827] border-[#38BDF8]/50 text-[#38BDF8]'
-                  : 'bg-[#FFB703]/15 border-[#FFB703]/50 text-[#FFB703]'
+                  ? 'bg-[#0B1120] border-[#38BDF8]/50 text-[#38BDF8]'
+                  : 'bg-[#FDE047]/15 border-[#FDE047]/50 text-[#FDE047]'
               }`}
               title={isAr ? 'سرعة رجوع البيتش للمركز' : 'Spring Return Speed'}
             >
@@ -299,15 +300,15 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
               onClick={() => setSendAllUpper(!sendAllUpper)}
               className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-all ${
                 sendAllUpper
-                  ? 'bg-[#FFB703]/20 border-[#FFB703]/50 text-[#FFB703]'
-                  : 'bg-[#111827] border-[#1E293B] text-neutral-400'
+                  ? 'bg-[#FDE047]/15 border-[#FDE047]/60 text-[#FDE047]'
+                  : 'bg-[#0B1120] border-[#1F2937] text-neutral-400'
               }`}
               title={isAr ? 'إرسال البيتش لقنوات Upper 1-3 معاً أو القناة 1 فقط' : 'Send to Upper 1-3 or Ch 1 only'}
             >
               {sendAllUpper ? 'Ch 1-3 (Upper)' : `Ch ${channel}`}
             </button>
 
-            <span dir="ltr" className="font-mono text-[11px] font-bold text-amber-300 min-w-[66px] text-end">
+            <span dir="ltr" className="font-mono text-[11px] font-black text-[#FFF08A] bg-[#030508] border-[1.5px] border-white/15 px-2 py-0.5 rounded min-w-[66px] text-center shadow-inner">
               {currentSemitones > 0.02
                 ? `+${currentSemitones.toFixed(1)} ST`
                 : currentSemitones < -0.02
@@ -317,7 +318,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
           </div>
         </div>
 
-        {/* Taller & Wider Tactile Touch Strip with Semitone & Center Ticks */}
+        {/* Machined-Metal Crystal Wheel Track with Illuminated Position Strip */}
         <div
           ref={pitchRef}
           dir="ltr"
@@ -341,21 +342,26 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
           onPointerCancel={() => {
             if (isPitchDragging) releasePitch();
           }}
-          className={`relative w-full ${compact ? 'h-14 sm:h-16' : 'h-28 sm:h-32'} bg-[#070B14] border border-[#1E293B] rounded-xl cursor-ew-resize overflow-hidden flex items-center shadow-inner touch-none`}
+          className={`relative w-full ${compact ? 'h-14 sm:h-16' : 'h-28 sm:h-32'} oled-subpanel border-[1.5px] border-white/20 rounded-xl cursor-ew-resize overflow-hidden flex items-center touch-none`}
         >
-          {/* Active deflection fill from Center (0) to current touch position */}
+          {/* Top Crystal-Glass Specular Reflection */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 via-white/[0.03] to-transparent z-10" />
+
+          {/* Illuminated LED Track Bar from Center (0) to current deflection */}
           <div
             style={{
               left: pitchBend >= 0 ? '50%' : `${((pitchBend + 1) / 2) * 100}%`,
               width: `${Math.abs(pitchBend) * 50}%`,
             }}
             className={`absolute top-0 bottom-0 pointer-events-none transition-colors ${
-              wheelMode === 'ribbon' ? 'bg-[#38BDF8]/15' : 'bg-[#FFB703]/15'
+              wheelMode === 'ribbon'
+                ? 'bg-gradient-to-r from-[#38BDF8]/30 via-[#0EA5E9]/20 to-[#38BDF8]/35'
+                : 'bg-gradient-to-r from-[#FFF08A]/25 via-[#FACC15]/18 to-[#B45309]/35'
             }`}
           />
 
-          {/* Horizontal ruler baseline */}
-          <div className="absolute inset-x-0 top-1/2 h-px bg-[#1E293B] pointer-events-none" />
+          {/* Metallic Center Axis & Illuminated Horizontal Fiber Track */}
+          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] bg-gradient-to-r from-slate-800 via-[#38BDF8]/65 to-slate-800 pointer-events-none" />
 
           {/* Clear Semitone Step Tick Marks & Center (0) Marker */}
           <div className="absolute inset-0 pointer-events-none">
@@ -378,9 +384,9 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                   <div
                     className={
                       isCenter
-                        ? 'w-0.5 h-full bg-[#FFB703]/70'
+                        ? 'w-0.5 h-full bg-[#FDE047]/80 shadow-[0_0_8px_rgba(253,224,71,0.75)]'
                         : isEdge
-                        ? 'w-px h-full bg-slate-600/70'
+                        ? 'w-px h-full bg-slate-600/80'
                         : pbRange === 12 && step % 3 !== 0
                         ? `w-px ${compact ? 'h-1.5' : 'h-2.5'} bg-slate-700/80`
                         : `w-px ${compact ? 'h-2.5' : 'h-4'} bg-slate-500/80`
@@ -390,8 +396,8 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                     <span
                       className={`px-1 rounded font-mono leading-none ${compact ? 'text-[8px]' : 'text-[9px] sm:text-[10px]'} ${
                         isCenter
-                          ? 'bg-[#0B1120] text-[#FFB703] font-black border border-[#FFB703]/40 py-0.5'
-                          : 'bg-[#070B14]/85 text-slate-400 font-bold'
+                          ? 'bg-[#05070B] text-[#FDE047] font-black border border-[#FDE047]/50 py-0.5'
+                          : 'bg-[#05070B]/90 text-slate-400 font-bold'
                       }`}
                     >
                       {step > 0 ? `+${step}` : step}
@@ -402,20 +408,27 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
             })}
           </div>
 
-          {/* Touch Slider Handle */}
+          {/* Machined-Metal Knurled Wheel Thumb Barrel with Illuminated Position Strip */}
           <div
             style={{ left: `${((pitchBend + 1) / 2) * 100}%` }}
-            className={`absolute ${compact ? 'top-1.5 bottom-1.5 w-10 sm:w-12 rounded-lg' : 'top-2 bottom-2 w-12 sm:w-14 rounded-xl'} -translate-x-1/2 z-20 flex items-center justify-center gap-1 pointer-events-none ${
+            className={`absolute ${compact ? 'top-1.5 bottom-1.5 w-11 sm:w-14 rounded-lg' : 'top-2 bottom-2 w-14 sm:w-16 rounded-xl'} -translate-x-1/2 z-20 flex items-center justify-center pointer-events-none hardware-wheel-knurl transition-shadow ${
               isPitchDragging
-                ? 'bg-gradient-to-b from-[#FDE047] to-[#FFB703] border-2 border-amber-100 ring-2 ring-[#FFB703]/70 shadow-[0_0_24px_rgba(255,183,3,0.85)]'
+                ? 'border-2 border-[#FEF08A] ring-2 ring-[#FDE047]/70 shadow-[0_0_24px_rgba(253,224,71,0.85),inset_0_1px_1px_rgba(255,255,255,0.45)]'
                 : wheelMode === 'ribbon'
-                ? 'bg-gradient-to-b from-[#38BDF8] to-[#0284C7] border-2 border-sky-200 shadow-[0_0_16px_rgba(56,189,248,0.5)]'
-                : 'bg-gradient-to-b from-[#334155] to-[#1E293B] border-2 border-[#FFB703]/85 shadow-[0_0_14px_rgba(255,183,3,0.4)]'
+                ? 'border-2 border-[#38BDF8] shadow-[0_0_18px_rgba(56,189,248,0.55),inset_0_1px_1px_rgba(255,255,255,0.35)]'
+                : 'border-2 border-[#94A3B8]/80 shadow-[0_4px_14px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.3)]'
             }`}
           >
-            <div className={`w-0.5 ${compact ? 'h-3.5' : 'h-6'} rounded-full ${isPitchDragging ? 'bg-[#070B14]/45' : 'bg-[#FFB703]/50'}`} />
-            <div className={`w-1 ${compact ? 'h-5' : 'h-9'} rounded-full ${isPitchDragging ? 'bg-[#070B14]/90' : 'bg-[#FFB703]'}`} />
-            <div className={`w-0.5 ${compact ? 'h-3.5' : 'h-6'} rounded-full ${isPitchDragging ? 'bg-[#070B14]/45' : 'bg-[#FFB703]/50'}`} />
+            {/* Illuminated Center Position LED Needle */}
+            <div
+              className={`w-1.5 ${compact ? 'h-7' : 'h-12'} rounded-full ${
+                wheelMode === 'ribbon'
+                  ? 'bg-[#38BDF8] shadow-[0_0_12px_#38BDF8]'
+                  : isPitchDragging
+                  ? 'bg-[#FEF08A] shadow-[0_0_14px_#FDE047]'
+                  : 'bg-[#FDE047] shadow-[0_0_10px_#FDE047]'
+              }`}
+            />
           </div>
 
           {/* Floating Reset 0 inside Ribbon strip when deflected */}
@@ -427,7 +440,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                 e.stopPropagation();
                 snapPitchToZero();
               }}
-              className="absolute top-2 right-2 z-30 px-2.5 py-1 rounded-lg bg-[#0B1120]/95 hover:bg-[#1E293B] border border-[#38BDF8] text-[#38BDF8] font-mono font-black text-[10px] shadow-lg pointer-events-auto"
+              className="absolute top-2 right-2 z-30 px-2.5 py-1 rounded-lg bg-[#05070B]/95 hover:bg-[#1E293B] border border-[#38BDF8] text-[#38BDF8] font-mono font-black text-[10px] shadow-lg pointer-events-auto"
             >
               Reset 0
             </button>
@@ -435,14 +448,15 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
         </div>
       </div>
 
-      {/* 2. Modulation Wheel / Ribbon */}
+      {/* 2. Machined-Metal Crystal Modulation Wheel (CC#1) */}
       <div className="space-y-1">
         <div className="flex items-center justify-between text-xs">
           <span className="font-bold text-[#38BDF8] flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${modulation > 0 ? 'bg-[#38BDF8] shadow-[0_0_8px_#38BDF8]' : 'bg-slate-600'}`} />
             <Waves className="w-3.5 h-3.5" />
-            <span>{isAr ? 'مودوليشن واهتزاز (Modulation CC#1)' : 'Modulation Ribbon'}</span>
+            <span>{isAr ? 'عجلة المودوليشن المعدنية (Modulation CC#1)' : 'Hardware Modulation Wheel'}</span>
           </span>
-          <span className="font-mono text-[11px] text-neutral-400">
+          <span className="font-mono text-[11px] font-bold text-[#38BDF8] bg-[#030508] border-[1.5px] border-white/15 px-1.5 py-0.5 rounded">
             {modulation} / 127
           </span>
         </div>
@@ -469,26 +483,30 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
           onPointerCancel={() => {
             setIsModDragging(false);
           }}
-          className="relative h-7 bg-[#070B14] border border-[#1E293B] rounded-lg cursor-ew-resize overflow-hidden flex items-center shadow-inner touch-none"
+          className="relative h-8 oled-subpanel border-[1.5px] border-white/20 rounded-lg cursor-ew-resize overflow-hidden flex items-center touch-none"
         >
-          {/* Active Fill Bar */}
+          {/* Top Crystal-Glass Specular Reflection */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent z-10" />
+
+          {/* Illuminated Cyan Track Bar */}
           <div
             style={{ width: `${(modulation / 127) * 100}%` }}
-            className="absolute left-0 top-0 bottom-0 bg-[#38BDF8]/25 border-r-2 border-[#38BDF8] pointer-events-none"
+            className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-[#0284C7]/30 to-[#38BDF8]/45 border-r-2 border-[#38BDF8] pointer-events-none"
           />
 
+          {/* Knurled Metal Modulation Wheel */}
           <div
             style={{ left: `${(modulation / 127) * 100}%` }}
-            className={`absolute top-0.5 bottom-0.5 w-6 -translate-x-1/2 rounded-md flex items-center justify-center pointer-events-none ${
+            className={`absolute top-0.5 bottom-0.5 w-8 -translate-x-1/2 rounded-md flex items-center justify-center pointer-events-none hardware-wheel-knurl ${
               isModDragging
-                ? 'bg-cyan-400 ring-2 ring-cyan-200'
-                : 'bg-neutral-600 border border-neutral-400'
+                ? 'border-[1.5px] border-[#BAE6FD] ring-2 ring-[#38BDF8]/65 led-glow-cyan'
+                : 'border-[1.5px] border-slate-400/80 shadow-[0_2px_8px_rgba(0,0,0,0.8)]'
             }`}
           >
-            <div className="w-0.5 h-3 bg-neutral-950/70 rounded-full" />
+            <div className="w-1 h-4 bg-[#38BDF8] rounded-full shadow-[0_0_8px_#38BDF8]" />
           </div>
 
-          <div className="w-full flex justify-between px-3 text-[9px] font-mono text-neutral-500 pointer-events-none">
+          <div className="w-full flex justify-between px-3 text-[9px] font-mono text-neutral-400 pointer-events-none relative z-20">
             <span>0</span>
             <button
               type="button"
@@ -499,7 +517,7 @@ export const PitchRibbon: React.FC<PitchRibbonProps> = ({ channel = 1, lang, com
                 lastModStepRef.current = 0;
                 midiEngine.sendModulation(0, channel, sendAllUpper);
               }}
-              className="text-[10px] text-neutral-400 hover:text-white pointer-events-auto"
+              className="text-[10px] font-bold text-slate-300 hover:text-white bg-[#030508]/85 px-2 rounded border-[1.5px] border-white/15 pointer-events-auto"
             >
               Reset
             </button>

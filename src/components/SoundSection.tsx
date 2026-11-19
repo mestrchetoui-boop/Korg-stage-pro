@@ -3,6 +3,7 @@ import { KorgSound, MixerPart, MidiChannelSettings } from '../types';
 import { KORG_SOUND_LIBRARY } from '../data/korgPresets';
 import { midiEngine } from '../services/midiEngine';
 import { audioEngine } from '../services/audioEngine';
+import { sendYamahaVoiceSelect, YamahaModelId, getYamahaModelSpec } from '../services/yamahaMidi';
 import { isSoundIndexUnlocked, canUseProFeature } from '../services/licenseService';
 import { Sliders, Volume2, VolumeX, Radio, Send, Play, Music, Sparkles, Lock } from 'lucide-react';
 
@@ -10,9 +11,17 @@ interface SoundSectionProps {
   isPro: boolean;
   onRequirePro: (featureLabel?: string) => void;
   lang: 'ar' | 'en';
+  activeBrand?: 'korg' | 'yamaha';
+  yamahaModel?: YamahaModelId;
 }
 
-export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro, lang }) => {
+export const SoundSection: React.FC<SoundSectionProps> = ({
+  isPro,
+  onRequirePro,
+  lang,
+  activeBrand = 'korg',
+  yamahaModel = 'psr_a5000',
+}) => {
   const isAr = lang === 'ar';
 
   const [channels, setChannels] = useState<MidiChannelSettings>(() => midiEngine.getChannels());
@@ -152,8 +161,12 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
 
   const handleSelectSound = (sound: KorgSound, ch: number = targetChannel) => {
     setSelectedSound(sound);
-    // Send MIDI Bank Select & PC to Korg
-    midiEngine.sendSound(ch, sound.msb, sound.lsb, sound.pc, sound.nameAr);
+    if (activeBrand === 'yamaha') {
+      sendYamahaVoiceSelect(sound.msb, sound.lsb, sound.pc, ch, sound.nameEn);
+    } else {
+      // Send MIDI Bank Select & PC to Korg
+      midiEngine.sendSound(ch, sound.msb, sound.lsb, sound.pc, sound.nameAr);
+    }
 
     // Update the corresponding part in mixer
     setMixerParts(prev => prev.map(p => p.channel === ch ? { ...p, sound } : p));
@@ -168,7 +181,13 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
       else audioEngine.setInstrument('strings');
     }
 
-    showToast(isAr ? `تم إرسال الصوت [${sound.nameAr}] للقناة ${ch}` : `Sent ${sound.nameEn} to Ch ${ch}`);
+    showToast(
+      activeBrand === 'yamaha'
+        ? `${getYamahaModelSpec(yamahaModel).shortLabel} · [${sound.nameEn}] → Ch ${ch}`
+        : isAr
+        ? `تم إرسال الصوت [${sound.nameAr}] للقناة ${ch}`
+        : `Sent ${sound.nameEn} to Ch ${ch}`
+    );
   };
 
   const handleSelectSTS = (stsNum: 1 | 2 | 3 | 4) => {
@@ -227,14 +246,16 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
     <div className="space-y-6">
 
       {/* STS 1 - 4 Physical Quick Bar */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">
-              {isAr ? 'أزرار الأطقم السريعة (STS / Keyboard Sets)' : 'KORG STS & Keyboard Sets'}
+              {activeBrand === 'yamaha'
+                ? (isAr ? 'أزرار التوليفات السريعة (OTS / Registration)' : 'Yamaha OTS & Sound Sets')
+                : (isAr ? 'أزرار الأطقم السريعة (STS / Keyboard Sets)' : 'KORG STS & Keyboard Sets')}
             </h2>
-            <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono">
-              KORG Pa4X / Pa5X Style
+            <span className="text-xs px-2 py-0.5 rounded bg-[#FACC15]/15 border-[1.5px] border-[#FACC15]/50 text-[#FFF08A] font-mono">
+              {activeBrand === 'yamaha' ? getYamahaModelSpec(yamahaModel).label : 'KORG Pa4X / Pa5X Style'}
             </span>
           </div>
           <p className="text-xs text-neutral-400 mt-1">
@@ -259,19 +280,17 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
               <button
                 key={sts}
                 onClick={() => handleSelectSTS(sts)}
-                className={`flex flex-col items-center justify-center py-2.5 px-3 sm:px-4 rounded-lg border transition-all active:scale-95 ${
+                className={`relative flex flex-col items-center justify-center py-2.5 px-3 sm:px-4 rounded-xl border-[1.5px] active-press ${
                   isActive
-                    ? 'bg-amber-500 text-neutral-950 font-bold border-amber-400 shadow-md ring-1 ring-amber-300'
-                    : 'bg-neutral-950 text-neutral-300 hover:text-white hover:bg-neutral-800 border-neutral-800'
+                    ? 'hardware-keycap-gold-active text-[#030508] font-black'
+                    : 'hardware-keycap-dark text-neutral-200 hover:text-white'
                 }`}
               >
+                <span className={`absolute top-1.5 end-1.5 w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 shadow-[0_0_8px_#10B981]' : 'bg-slate-600'}`} />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs sm:text-sm font-mono font-black">STS {sts}</span>
-                  <div
-                    className={`w-2 h-2 rounded-full ${
-                      isActive ? 'bg-neutral-950' : 'bg-neutral-700'
-                    }`}
-                  />
+                  <span className="text-xs sm:text-sm font-mono font-black">
+                    {activeBrand === 'yamaha' ? `OTS ${sts}` : `STS ${sts}`}
+                  </span>
                 </div>
                 <span className="text-[10px] mt-0.5 opacity-90 truncate max-w-[70px]">
                   {stsNames[sts - 1]}
@@ -286,11 +305,11 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left Column: Sound Library & Bank Browser (2 cols wide on desktop) */}
-        <div className="lg:col-span-2 bg-neutral-900 border border-neutral-800 rounded-xl p-4 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+        <div className="lg:col-span-2 oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Music className="w-4 h-4 text-amber-400" />
+                <Music className="w-4 h-4 text-[#FACC15]" />
                 <span>{isAr ? 'مكتبة أصوات وبرامج كورج (Factory & Oriental)' : 'KORG Sound & Program Library'}</span>
               </h3>
               <p className="text-xs text-neutral-400 mt-0.5">
@@ -299,12 +318,12 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
             </div>
 
             {/* Target MIDI Channel for Sound Selection */}
-            <div className="flex items-center gap-2 bg-neutral-950 px-3 py-1.5 rounded-lg border border-neutral-800 self-start sm:self-auto">
+            <div className="flex items-center gap-2 bg-[#030508] px-3 py-1.5 rounded-lg border-[1.5px] border-white/15 self-start sm:self-auto">
               <span className="text-xs text-neutral-400 whitespace-nowrap">{isAr ? 'القناة المستهدفة:' : 'Target Part:'}</span>
               <select
                 value={targetChannel}
                 onChange={(e) => setTargetChannel(Number(e.target.value))}
-                className="bg-neutral-900 text-amber-400 font-mono font-bold text-xs border border-neutral-700 rounded px-2 py-1 focus:outline-none"
+                className="bg-[#030508] text-[#FFF08A] font-mono font-bold text-xs border border-white/20 rounded px-2 py-1 focus:outline-none"
               >
                 <option value={channels.upper1}>Upper 1 (قناة {channels.upper1})</option>
                 <option value={channels.upper2}>Upper 2 (قناة {channels.upper2})</option>
@@ -371,26 +390,26 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
                     }
                     handleSelectSound(s, targetChannel);
                   }}
-                  className={`p-3.5 rounded-lg border transition-all cursor-pointer flex flex-col justify-between ${
+                  className={`p-3.5 rounded-xl border-[1.5px] transition-all cursor-pointer flex flex-col justify-between ${
                     isLocked
-                      ? 'bg-neutral-950/40 border-neutral-800/60 opacity-75 hover:border-amber-500/40'
+                      ? 'bg-[#030508]/60 border-white/10 opacity-75 hover:border-[#FACC15]/40'
                       : isSelected
-                      ? 'bg-neutral-800 border-amber-500 shadow-md ring-1 ring-amber-500/30'
-                      : 'bg-neutral-950/70 border-neutral-800/80 hover:bg-neutral-800/50 hover:border-neutral-700'
+                      ? 'bg-[#FACC15]/15 border-[#FACC15] shadow-[0_0_20px_rgba(250,204,21,0.28)] ring-1 ring-[#FFF08A]/40'
+                      : 'bg-[#030508]/90 border-white/15 hover:border-white/30'
                   }`}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className={`text-sm font-bold flex items-center gap-1.5 ${isSelected ? 'text-amber-400' : 'text-neutral-100'}`}>
+                      <span className={`text-sm font-bold flex items-center gap-1.5 ${isSelected ? 'text-[#FFF08A]' : 'text-neutral-100'}`}>
                         <span>{isAr ? s.nameAr : s.nameEn}</span>
                         {isLocked && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[9px] font-black">
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#FACC15]/20 border border-[#FACC15]/45 text-[#FFF08A] text-[9px] font-black">
                             <Lock className="w-2.5 h-2.5" />
                             PRO
                           </span>
                         )}
                       </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-neutral-400 shrink-0">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#030508] border border-white/15 text-neutral-300 shrink-0">
                         PC #{s.pc}
                       </span>
                     </div>
@@ -400,8 +419,8 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
                     </p>
                   </div>
 
-                  <div className="mt-3 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[11px] font-mono text-neutral-400">
-                    <span className="text-amber-400/90">
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-[11px] font-mono text-neutral-400">
+                    <span className="text-[#FACC15]">
                       MSB: {s.msb} · LSB: {s.lsb}
                     </span>
                     <button
@@ -413,7 +432,7 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
                         }
                         handleSelectSound(s, targetChannel);
                       }}
-                      className="px-2 py-0.5 text-[10px] font-bold text-neutral-900 bg-amber-400 hover:bg-amber-300 rounded flex items-center gap-1"
+                      className="px-2.5 py-0.5 text-[10px] font-black text-[#030508] hardware-keycap-gold rounded flex items-center gap-1"
                     >
                       {isLocked ? <Lock className="w-2.5 h-2.5" /> : <Send className="w-2.5 h-2.5" />}
                       <span>{isLocked ? 'PRO' : (isAr ? 'إرسال' : 'Send')}</span>
@@ -426,11 +445,11 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
         </div>
 
         {/* Right Column: 4-Part Mixer (Upper 1, Upper 2, Upper 3, Lower) */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 sm:p-6 shadow-xl flex flex-col justify-between">
+        <div className="oled-metal-panel border-[1.5px] border-white/15 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 mb-4 border-b border-neutral-800">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/15">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-amber-400" />
+                <Sliders className="w-4 h-4 text-[#FACC15]" />
                 <span>{isAr ? 'ميكسر التراكات (Part Mixer)' : '4-Part Performance Mixer'}</span>
               </h3>
               <span className="text-xs text-neutral-400 font-mono">Ch 1-4</span>
@@ -441,10 +460,10 @@ export const SoundSection: React.FC<SoundSectionProps> = ({ isPro, onRequirePro,
               {mixerParts.map((part, idx) => (
                 <div
                   key={part.id}
-                  className={`p-3 rounded-lg border transition-all ${
+                  className={`p-3 rounded-xl border-[1.5px] transition-all ${
                     part.muted
-                      ? 'bg-neutral-950/50 border-neutral-800/50 opacity-60'
-                      : 'bg-neutral-950 border-neutral-800'
+                      ? 'bg-[#030508]/60 border-white/10 opacity-60'
+                      : 'bg-[#030508] border-white/15'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
