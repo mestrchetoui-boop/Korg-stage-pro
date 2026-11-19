@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies and build web app
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/ios --legacy-peer-deps
+          npm install @capacitor/ios cordova-plugin-midi --legacy-peer-deps
           npm run build
 
       - name: Add iOS platform and sync
