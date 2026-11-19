@@ -1216,3 +1216,21 @@ class MidiEngine {
 }
 
 export const midiEngine = new MidiEngine();
+// === التحكم المستقل في الأورج 1 (البنوك 1-4) والأورج 2 (البنوك 5-8) بدون لمس القنوات ===
+const _origSendRaw = midiEngine.sendRaw.bind(midiEngine);
+midiEngine.sendRaw = function (data: number[], label?: string, type?: any) {
+  const engineAny = midiEngine as any;
+  const outputs: MIDIOutput[] = engineAny.midiAccess
+    ? Array.from(engineAny.midiAccess.outputs.values())
+    : [];
+
+  if (outputs.length >= 2 && data.length >= 3 && (data[0] & 0xf0) === 0xb0 && data[1] === 0x20) {
+    const bankNum = data[2];
+    const targetPort = bankNum >= 4 ? outputs[1] : outputs[0];
+    if (targetPort) {
+      engineAny.activeOutput = targetPort;
+      engineAny.output = targetPort;
+    }
+  }
+  return _origSendRaw(data, label, type);
+};
