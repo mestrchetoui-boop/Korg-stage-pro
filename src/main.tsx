@@ -1,9 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { registerPwaAutoUpdate } from './services/pwaUpdate';
-
-registerPwaAutoUpdate();
 
 const CURRENT_APP_VERSION = '1.0.1';
 const VERSION_CHECK_URL = 'https://githubusercontent.com';
@@ -26,4 +23,3 @@ async function checkForAppUpdates() {
 checkForAppUpdates();
 
 createRoot(document.getElementById('root')!).render(<App />);
-
