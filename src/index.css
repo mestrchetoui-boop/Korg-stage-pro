@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;/* إظهار اسم الصوت والإيقاع بوضوح وإخفاء الكتابة الفرعية فقط */
+@import "tailwindcss";/* إظهار اسم الصوت والإيقاع بوضوح وإخفاء الكتابة الفرعية فقط */
 button[data-pad-color] > span:nth-of-type(2) {
   display: block !important;
   font-size: 16px !important;
