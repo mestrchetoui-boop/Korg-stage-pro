@@ -3353,7 +3353,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           </div>
       
         ):null}
-      })()}
+
 
       {/* Live Stage Setlist Manager Modal */}
       {isSetlistModalOpen && (
