@@ -2526,7 +2526,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         handlePadClick(pad);
                       }}
                       className={`relative ${portraitBtnSize} rounded-xl flex flex-col justify-between items-center text-center active-press ${getPadButtonClasses(pad, isActive)} ${isLocked ? 'opacity-75' : ''}`}
-                    >
+                    data-pad-color={pad.color || ''}
+>
                       <span
                         className={`absolute top-1.5 start-1.5 w-2 h-2 rounded-full border border-[#05070B]/70 ${
                           isActive
