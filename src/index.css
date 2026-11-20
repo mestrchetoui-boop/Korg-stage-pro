@@ -1,19 +1,593 @@
-@import "tailwindcss";/* إظهار اسم الصوت والإيقاع بوضوح وإخفاء الكتابة الفرعية فقط */
-button[data-pad-color] > span:nth-of-type(2) {
-  display: block !important;
-  font-size: 16px !important;
-  font-weight: 900 !important;
-}
-button[data-pad-color] > span:nth-of-type(n+3) {
-  display: none !important;
+import {
+  MidiDeviceOption,
+  MidiLogMessage,
+  NoteName,
+  NoteTuning,
+  KorgModelProfile,
+  MidiChannelSettings,
+} from '../types';
+import { NOTE_NAMES, KORG_MODELS } from '../data/korgPresets';
+
+export type TuningProtocol =
+  | 'korg_pa3x_gs'
+  | 'pitch_bend_only';
+
+export interface ManualTrackControls {
+  easyEdit?: {
+    enabled?: boolean;
+    attack?: number;
+    decay?: number;
+    release?: number;
+    cutoff?: number;
+    resonance?: number;
+    lfoDepth?: number;
+    lfoSpeed?: number;
+    lfoDelay?: number;
+    portamentoOn?: boolean;
+    portamentoTime?: number;
+  };
+  tuning?: {
+    enabled?: boolean;
+    pbSensitivity?: number;
+    octTranspose?: number;
+    detune?: number;
+    muted?: boolean;
+  };
+  mixerFx?: {
+    enabled?: boolean;
+    volume?: number;
+    pan?: number;
+    reverbSend?: number;
+    chorusSend?: number;
+    delaySend?: number;
+  };
 }
 
-/* تلوين كل صوت على حدة حسب اللون المختار */
-button[data-pad-color="gold"] { background: linear-gradient(145deg, #fde047, #eab308, #ca8a04) !important; color: #000 !important; border-color: #fef08a !important; }
-button[data-pad-color="cyan"] { background: linear-gradient(145deg, #22d3ee, #0891b2) !important; color: #fff !important; border-color: #67e8f9 !important; }
-button[data-pad-color="emerald"] { background: linear-gradient(145deg, #34d399, #059669) !important; color: #fff !important; border-color: #6ee7b7 !important; }
-button[data-pad-color="rose"] { background: linear-gradient(145deg, #fb7185, #e11d48) !important; color: #fff !important; border-color: #fda4af !important; }
-button[data-pad-color="purple"] { background: linear-gradient(145deg, #c084fc, #9333ea) !important; color: #fff !important; border-color: #d8b4fe !important; }
-button[data-pad-color="orange"] { background: linear-gradient(145deg, #fb923c, #ea580c) !important; color: #fff !important; border-color: #fdba74 !important; }
-button[data-pad-color="blue"] { background: linear-gradient(145deg, #60a5fa, #2563eb) !important; color: #fff !important; border-color: #93c5fd !important; }
-button[data-pad-color="pink"] { background: linear-gradient(145deg, #f472b6, #db2777) !important; color: #fff !important; border-color: #f9a8d4 !important; }
+const STORAGE_KEYS = {
+  MODEL_ID: 'korg_selected_model_id',
+  PROTOCOL: 'korg_tuning_protocol',
+  OUT_ID: 'korg_midi_out_id',
+  IN_ID: 'korg_midi_in_id',
+  CHANNELS: 'korg_midi_channels',
+};
+
+const KORG_PA3X_RESET_SYSEX = [
+  0xF0, 0x42, 0x7F, 0x60, 0x01, 0x01, 0x00, 0x7D,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF7,
+];
+
+type MidiLogCallback = (message: MidiLogMessage) => void;
+type NoteEventCallback = (note: number, velocity: number, isNoteOn: boolean) => void;
+type StateChangeCallback = () => void;
+
+class MidiEngine {
+  private midiAccess: MIDIAccess | null = null;
+  private selectedOutput: MIDIOutput | null = null;
+  private selectedInput: MIDIInput | null = null;
+  private isSupported: boolean = false;
+  private sysexEnabled: boolean = false;
+  private logCallbacks: Set<MidiLogCallback> = new Set();
+  private noteCallbacks: Set<NoteEventCallback> = new Set();
+  private stateCallbacks: Set<StateChangeCallback> = new Set();
+  private isSimulationMode: boolean = false;
+  private korgModel: KorgModelProfile | null = null;
+  private tuningProtocol: TuningProtocol = 'korg_pa3x_gs';
+  private channels: MidiChannelSettings = {
+    upper1: 1,
+    upper2: 2,
+    upper3: 3,
+    lower: 4,
+    arranger: 16,
+  };
+  private lastTunings: Record<NoteName, NoteTuning> | null = null;
+  private sysexTimers: number[] = [];
+  private soundTimers: number[] = [];
+  private styleTimers: number[] = [];
+  private pendingOpenPromise: Promise<void> | null = null;
+  private openQueuedMessages: Array<{ output: MIDIOutput; bytes: number[] }> = [];
+  private stateChangeTimer: number | null = null;
+  private isAutoConnecting: boolean = false;
+  private lastCapturedSysEx: string[] = [];
+  private recentLogs: MidiLogMessage[] = [];
+
+  constructor() {
+    this.checkMidiSupport();
+    this.loadSavedSettings();
+  }
+
+  private clampChannel(val: unknown, fallback: number): number {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(16, Math.round(n)));
+  }
+
+  private getModelDefaultChannels(model: KorgModelProfile): MidiChannelSettings {
+    return {
+      upper1: model.upper1Channel,
+      upper2: model.upper2Channel,
+      upper3: model.upper3Channel,
+      lower: model.lowerChannel,
+      arranger: model.arrangerChannel,
+    };
+  }
+
+  private loadSavedSettings() {
+    if (typeof window === 'undefined') return;
+    try {
+      const savedModelId = localStorage.getItem(STORAGE_KEYS.MODEL_ID);
+      const defaultModel = KORG_MODELS.find(m => m.id === 'pa600') || KORG_MODELS[3];
+      this.korgModel = (savedModelId && KORG_MODELS.find(m => m.id === savedModelId)) || defaultModel;
+      if (!savedModelId) {
+        localStorage.setItem(STORAGE_KEYS.MODEL_ID, this.korgModel.id);
+      }
+
+      const savedProto = localStorage.getItem(STORAGE_KEYS.PROTOCOL) as TuningProtocol | null;
+      if (savedProto === 'korg_pa3x_gs' || savedProto === 'pitch_bend_only') {
+        this.tuningProtocol = savedProto;
+      } else {
+        this.tuningProtocol = 'korg_pa3x_gs';
+        localStorage.setItem(STORAGE_KEYS.PROTOCOL, this.tuningProtocol);
+      }
+
+      const defaults = this.getModelDefaultChannels(this.korgModel);
+      const savedChannelsRaw = localStorage.getItem(STORAGE_KEYS.CHANNELS);
+      if (savedChannelsRaw) {
+        const parsed = JSON.parse(savedChannelsRaw) as Partial<MidiChannelSettings>;
+        this.channels = {
+          upper1: this.clampChannel(parsed.upper1, defaults.upper1),
+          upper2: this.clampChannel(parsed.upper2, defaults.upper2),
+          upper3: this.clampChannel(parsed.upper3, defaults.upper3),
+          lower: this.clampChannel(parsed.lower, defaults.lower),
+          arranger: this.clampChannel(parsed.arranger, defaults.arranger),
+        };
+      } else {
+        this.channels = defaults;
+        localStorage.setItem(STORAGE_KEYS.CHANNELS, JSON.stringify(this.channels));
+      }
+    } catch (_) {
+      this.korgModel = KORG_MODELS.find(m => m.id === 'pa600') || KORG_MODELS[3];
+      this.tuningProtocol = 'korg_pa3x_gs';
+      this.channels = this.getModelDefaultChannels(this.korgModel);
+    }
+  }
+
+  public reloadFromStorage() {
+    this.loadSavedSettings();
+    this.notifyStateCallbacks();
+  }
+
+  public checkMidiSupport(): boolean {
+    if (typeof window !== 'undefined' && 'navigator' in window && 'requestMIDIAccess' in navigator) {
+      this.isSupported = true;
+      return true;
+    }
+    this.isSupported = false;
+    this.isSimulationMode = true;
+    return false;
+  }
+
+  private scorePort(port: MIDIPort): number {
+    const name = (port.name || '').toLowerCase();
+    const mfg = (port.manufacturer || '').toLowerCase();
+    const combined = `${name} ${mfg}`;
+
+    if (/through|microsoft|gs wavetable|wavetable|virtual|dummy|loopback|iac|android usb peripheral/i.test(combined)) {
+      return -200;
+    }
+    if (/korg|pa3x|pa4x|pa5x|pa600|pa700|pa800|pa900|pa1000|kronos|triton|nautilus|pa\d/i.test(combined)) {
+      return 200;
+    }
+    if (/usb|otg|ch345|qinheng|roland|yamaha|focusrite|m-audio|steinberg|midisport|esi|icon|mio|cable|interface/i.test(combined)) {
+      return 100;
+    }
+    if (/midi/i.test(combined)) {
+      return 20;
+    }
+    return 10;
+  }
+
+  private pickBestPort<T extends MIDIPort>(ports: Iterable<T>, preferredId?: string | null): T | null {
+    const connected: T[] = [];
+    for (const p of ports) {
+      if (p.state === 'connected') {
+        connected.push(p);
+      }
+    }
+    if (connected.length === 0) return null;
+
+    const sorted = [...connected].sort((a, b) => this.scorePort(b) - this.scorePort(a));
+
+    if (preferredId) {
+      const preferred = connected.find(p => p.id === preferredId);
+      // Use saved port if connected and not a degraded virtual/through port when real hardware exists
+      if (preferred && (this.scorePort(preferred) >= 0 || this.scorePort(sorted[0]) < 0)) {
+        return preferred;
+      }
+    }
+
+    return sorted[0];
+  }
+
+  public async initialize(): Promise<{ success: boolean; sysex: boolean; error?: string }> {
+    if (!this.checkMidiSupport()) {
+      this.isSimulationMode = true;
+      this.sysexEnabled = false;
+      this.log('system', 'out', 'Web MIDI API غير مدعوم في هذا المتصفح. تم تفعيل وضع المحاكاة الداخلي الكامل.', 'SIMULATOR_ACTIVE');
+      this.notifyStateCallbacks();
+      return { success: false, sysex: false, error: 'Web MIDI API not supported in this browser' };
+    }
+
+    try {
+      this.midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+      this.sysexEnabled = true;
+      this.isSimulationMode = false;
+      this.log('system', 'in', 'تم تهيئة اتصال MIDI بنجاح مع صلاحية SysEx الكاملة!', 'INIT_SYSEX_OK');
+    } catch (sysexErr: unknown) {
+      try {
+        this.midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+        this.sysexEnabled = false;
+        this.isSimulationMode = false;
+        const msg = sysexErr instanceof Error ? sysexErr.message : String(sysexErr);
+        this.log(
+          'system',
+          'out',
+          `تم الاتصال بـ MIDI بنجاح (الأصوات والإيقاعات والكلافيي تعمل بشكل طبيعي، SysEx غير مفعل: ${msg}).`,
+          'INIT_NO_SYSEX'
+        );
+      } catch (err: unknown) {
+        this.sysexEnabled = false;
+        this.isSimulationMode = true;
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        this.log('system', 'out', `تعذر الوصول لأجهزة MIDI (${errorMsg}). تم تفعيل المحاكاة الصوتية.`, 'SYS_FALLBACK');
+        this.notifyStateCallbacks();
+        return { success: false, sysex: false, error: errorMsg };
+      }
+    }
+
+    await this.autoConnectPorts(true);
+
+    this.midiAccess.onstatechange = () => {
+      if (this.stateChangeTimer !== null) {
+        clearTimeout(this.stateChangeTimer);
+      }
+      this.stateChangeTimer = window.setTimeout(async () => {
+        this.stateChangeTimer = null;
+        await this.autoConnectPorts(false);
+        this.log('system', 'in', 'تم اكتشاف تغيير في كابل/أجهزة MIDI المتصلة.', 'STATE_CHANGE');
+        this.notifyStateCallbacks();
+      }, 120);
+    };
+
+    this.notifyStateCallbacks();
+    return { success: true, sysex: this.sysexEnabled };
+  }
+
+  private async autoConnectPorts(forceResync: boolean) {
+    if (!this.midiAccess || this.isAutoConnecting) return;
+    this.isAutoConnecting = true;
+    try {
+      let savedOutId: string | null = null;
+      let savedInId: string | null = null;
+      try {
+        savedOutId = localStorage.getItem(STORAGE_KEYS.OUT_ID);
+        savedInId = localStorage.getItem(STORAGE_KEYS.IN_ID);
+      } catch (_) {}
+
+      const currentOutputs = Array.from(this.midiAccess.outputs.values());
+      const stillValidOut = this.selectedOutput && currentOutputs.some(
+        o => o.id === this.selectedOutput?.id && o.state === 'connected'
+      );
+
+      if (!stillValidOut) {
+        this.selectedOutput = null;
+        const bestOut = this.pickBestPort(currentOutputs, savedOutId);
+        if (bestOut) {
+          await this.selectOutput(bestOut.id, false);
+        }
+      } else if (forceResync && this.selectedOutput) {
+        try {
+          if (this.selectedOutput.connection !== 'open') {
+            await this.selectedOutput.open();
+          }
+        } catch (_) {}
+      }
+
+      const currentInputs = Array.from(this.midiAccess.inputs.values());
+      const stillValidIn = this.selectedInput && currentInputs.some(
+        i => i.id === this.selectedInput?.id && i.state === 'connected'
+      );
+
+      if (!stillValidIn) {
+        this.selectedInput = null;
+        const bestIn = this.pickBestPort(currentInputs, savedInId);
+        if (bestIn) {
+          await this.selectInput(bestIn.id, false);
+        }
+      } else if (forceResync && this.selectedInput) {
+        try {
+          if (this.selectedInput.connection !== 'open') {
+            await this.selectedInput.open();
+          }
+        } catch (_) {}
+      }
+    } finally {
+      this.isAutoConnecting = false;
+    }
+  }
+
+  public setModel(model: KorgModelProfile, applyModelChannels: boolean = false) {
+    this.korgModel = model;
+    try {
+      localStorage.setItem(STORAGE_KEYS.MODEL_ID, model.id);
+    } catch (_) {}
+    if (applyModelChannels) {
+      this.channels = this.getModelDefaultChannels(model);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CHANNELS, JSON.stringify(this.channels));
+      } catch (_) {}
+    }
+    this.log('system', 'out', `تم اختيار وحفظ طراز كورج: ${model.name}`, `MODEL:${model.id}`);
+    this.notifyStateCallbacks();
+  }
+
+  public getModel(): KorgModelProfile {
+    return this.korgModel || KORG_MODELS.find(m => m.id === 'pa600') || KORG_MODELS[3];
+  }
+
+  public getChannels(): MidiChannelSettings {
+    return { ...this.channels };
+  }
+
+  public setChannels(next: MidiChannelSettings) {
+    const model = this.getModel();
+    const defaults = this.getModelDefaultChannels(model);
+    this.channels = {
+      upper1: this.clampChannel(next.upper1, defaults.upper1),
+      upper2: this.clampChannel(next.upper2, defaults.upper2),
+      upper3: this.clampChannel(next.upper3, defaults.upper3),
+      lower: this.clampChannel(next.lower, defaults.lower),
+      arranger: this.clampChannel(next.arranger, defaults.arranger),
+    };
+    try {
+      localStorage.setItem(STORAGE_KEYS.CHANNELS, JSON.stringify(this.channels));
+    } catch (_) {}
+    this.log(
+      'system',
+      'out',
+      `تم حفظ إعدادات القنوات: U1=${this.channels.upper1}, U2=${this.channels.upper2}, U3=${this.channels.upper3}, Low=${this.channels.lower}, Arr=${this.channels.arranger}`,
+      'CHANNELS_SAVED'
+    );
+    this.notifyStateCallbacks();
+  }
+
+  public setTuningProtocol(protocol: TuningProtocol) {
+    this.tuningProtocol = protocol;
+    try {
+      localStorage.setItem(STORAGE_KEYS.PROTOCOL, protocol);
+    } catch (_) {}
+    this.log('system', 'out', `تم تغيير وحفظ بروتوكول التشريق: ${protocol}`, `PROTO:${protocol}`);
+    this.notifyStateCallbacks();
+  }
+
+  public getTuningProtocol(): TuningProtocol {
+    return this.tuningProtocol;
+  }
+
+  public isSysExEnabled(): boolean {
+    return this.sysexEnabled;
+  }
+
+  public hasConnectedOutput(): boolean {
+    return this.selectedOutput !== null && this.selectedOutput.state === 'connected';
+  }
+
+  public getSelectedOutputName(): string {
+    return this.selectedOutput?.name || '';
+  }
+
+  public getSelectedOutputId(): string {
+    return this.selectedOutput?.id || '';
+  }
+
+  public getSelectedInputId(): string {
+    return this.selectedInput?.id || '';
+  }
+
+  public setInitialTunings(tunings: Record<NoteName, NoteTuning>) {
+    this.lastTunings = tunings;
+  }
+
+  public getCapturedSysEx(): string[] {
+    return this.lastCapturedSysEx;
+  }
+
+  public clearCapturedSysEx() {
+    this.lastCapturedSysEx = [];
+    this.notifyStateCallbacks();
+  }
+
+  public getRecentLogs(): MidiLogMessage[] {
+    return this.recentLogs;
+  }
+
+  public clearLogs() {
+    this.recentLogs = [];
+  }
+
+  public getOutputs(): MidiDeviceOption[] {
+    if (!this.midiAccess) return [];
+    const list: MidiDeviceOption[] = [];
+    this.midiAccess.outputs.forEach((output) => {
+      list.push({
+        id: output.id,
+        name: output.name || `MIDI Output (${output.id})`,
+        manufacturer: output.manufacturer || 'Unknown',
+        state: output.state as 'connected' | 'disconnected',
+      });
+    });
+    return list;
+  }
+
+  public getInputs(): MidiDeviceOption[] {
+    if (!this.midiAccess) return [];
+    const list: MidiDeviceOption[] = [];
+    this.midiAccess.inputs.forEach((input) => {
+      list.push({
+        id: input.id,
+        name: input.name || `MIDI Input (${input.id})`,
+        manufacturer: input.manufacturer || 'Unknown',
+        state: input.state as 'connected' | 'disconnected',
+      });
+    });
+    return list;
+  }
+
+  public async selectOutput(id: string, persistSelection: boolean = true): Promise<boolean> {
+    if (!this.midiAccess) return false;
+    const output = this.midiAccess.outputs.get(id);
+    if (output) {
+      try {
+        if (output.connection !== 'open') {
+          await output.open();
+        }
+      } catch (_) {}
+      this.selectedOutput = output;
+      if (persistSelection) {
+        try { localStorage.setItem(STORAGE_KEYS.OUT_ID, id); } catch (_) {}
+      }
+      this.log('system', 'out', `تم ربط مخرج MIDI: ${output.name}`, `OUT_SELECT:${id}`);
+      this.notifyStateCallbacks();
+      return true;
+    }
+    return false;
+  }
+
+  public async selectInput(id: string, persistSelection: boolean = true): Promise<boolean> {
+    if (!this.midiAccess) return false;
+    if (this.selectedInput) {
+      this.selectedInput.onmidimessage = null;
+    }
+    const input = this.midiAccess.inputs.get(id);
+    if (input) {
+      try {
+        if (input.connection !== 'open') {
+          await input.open();
+        }
+      } catch (_) {}
+      this.selectedInput = input;
+      this.selectedInput.onmidimessage = (e) => this.handleIncomingMidi(e);
+      if (persistSelection) {
+        try { localStorage.setItem(STORAGE_KEYS.IN_ID, id); } catch (_) {}
+      }
+      this.log('system', 'in', `تم ربط مدخل MIDI: ${input.name}`, `IN_SELECT:${id}`);
+      this.notifyStateCallbacks();
+      return true;
+    }
+    return false;
+  }
+
+  private handleIncomingMidi(e: MIDIMessageEvent) {
+    if (!e.data || e.data.length === 0) return;
+    const status = e.data[0];
+    const channel = (status & 0x0f) + 1;
+    const command = status & 0xf0;
+    const data1 = e.data[1];
+    const data2 = e.data[2];
+
+    const hex = Array.from(e.data).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+
+    if (status === 0xF0) {
+      // Capture incoming SysEx for inspection ONLY — never update tuning UI or echo back (prevents MIDI Loopback)
+      this.lastCapturedSysEx = [hex, ...this.lastCapturedSysEx.filter(h => h !== hex)].slice(0, 12);
+      this.log('sysex', 'in', `SysEx وارد من الأورغ (${e.data.length} bytes)`, hex);
+      this.notifyStateCallbacks();
+    } else if (command === 0x90 && data2 > 0) {
+      this.log('note_on', 'in', `Note On [Ch ${channel}]: Key ${data1} Vel ${data2}`, hex, channel);
+      this.notifyNoteCallbacks(data1, data2, true);
+    } else if (command === 0x80 || (command === 0x90 && data2 === 0)) {
+      this.log('note_off', 'in', `Note Off [Ch ${channel}]: Key ${data1}`, hex, channel);
+      this.notifyNoteCallbacks(data1, 0, false);
+    } else if (command === 0xB0) {
+      this.log('cc', 'in', `CC [Ch ${channel}]: #${data1} = ${data2}`, hex, channel);
+    } else if (command === 0xC0) {
+      this.log('pc', 'in', `Program Change [Ch ${channel}]: ${data1}`, hex, channel);
+    }
+  }
+
+  public subscribeLog(cb: MidiLogCallback): () => void {
+    this.logCallbacks.add(cb);
+    return () => this.logCallbacks.delete(cb);
+  }
+
+  public subscribeNotes(cb: NoteEventCallback): () => void {
+    this.noteCallbacks.add(cb);
+    return () => this.noteCallbacks.delete(cb);
+  }
+
+  public subscribeState(cb: StateChangeCallback): () => void {
+    this.stateCallbacks.add(cb);
+    return () => this.stateCallbacks.delete(cb);
+  }
+
+  private notifyNoteCallbacks(note: number, velocity: number, isNoteOn: boolean) {
+    this.noteCallbacks.forEach(cb => {
+      try { cb(note, velocity, isNoteOn); } catch (e) { console.error(e); }
+    });
+  }
+
+  private notifyStateCallbacks() {
+    this.stateCallbacks.forEach(cb => {
+      try { cb(); } catch (e) { console.error(e); }
+    });
+  }
+
+  private log(type: MidiLogMessage['type'], direction: 'out' | 'in', description: string, hex: string, channel?: number) {
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+      '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+    const msg: MidiLogMessage = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: time,
+      type,
+      direction,
+      channel,
+      description,
+      hex,
+    };
+
+    this.recentLogs = [msg, ...this.recentLogs.slice(0, 79)];
+
+    this.logCallbacks.forEach(cb => {
+      try { cb(msg); } catch (e) { console.error(e); }
+    });
+  }
+
+  public sendRaw(bytes: number[], description: string, type: MidiLogMessage['type'] = 'sysex', channel?: number): boolean {
+    if (!Array.isArray(bytes) || bytes.length === 0) return false;
+    const isSysExMsg = bytes[0] === 0xF0;
+    const clamp7 = (val: unknown): number => Math.max(0, Math.min(127, Math.round(Number(val) || 0)));
+    const sanitized = bytes.map((b, idx) => {
+      if (idx === 0) {
+        const status = Math.round(Number(b) || 0);
+        return Math.max(0x80, Math.min(0xFF, status));
+      }
+      if (isSysExMsg && idx === bytes.length - 1) {
+        return 0xF7;
+      }
+      return clamp7(b);
+    });
+    const hex = sanitized.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+
+    if (this.selectedOutput && this.selectedOutput.state === 'connected') {
+      if (isSysExMsg && !this.sysexEnabled) {
+        this.log(
+          type,
+          'out',
+          `[SysEx محظور في المتصفح] ${description}`,
+          hex,
+          channel
+        );
+        return false;
+  
