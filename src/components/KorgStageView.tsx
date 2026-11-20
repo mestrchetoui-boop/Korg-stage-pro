@@ -3296,7 +3296,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     </div>
                   );
                 })()
-                  }})
+                  })
 
               
                 <div>
