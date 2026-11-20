@@ -1,11 +1,19 @@
 /* إظهار اسم الصوت والإيقاع بوضوح وإخفاء الكتابة الفرعية فقط */
-button[class*="rounded-xl"] > span:nth-of-type(1),
-button[class*="rounded-lg"] > span:nth-of-type(1) {
+button[data-pad-color] > span:nth-of-type(2) {
   display: block !important;
   font-size: 16px !important;
   font-weight: 900 !important;
 }
-button[class*="rounded-xl"] > span:nth-of-type(n+2),
-button[class*="rounded-lg"] > span:nth-of-type(n+2) {
+button[data-pad-color] > span:nth-of-type(n+3) {
   display: none !important;
 }
+
+/* تلوين كل صوت على حدة حسب اللون المختار */
+button[data-pad-color="gold"] { background: linear-gradient(145deg, #fde047, #eab308, #ca8a04) !important; color: #000 !important; border-color: #fef08a !important; }
+button[data-pad-color="cyan"] { background: linear-gradient(145deg, #22d3ee, #0891b2) !important; color: #fff !important; border-color: #67e8f9 !important; }
+button[data-pad-color="emerald"] { background: linear-gradient(145deg, #34d399, #059669) !important; color: #fff !important; border-color: #6ee7b7 !important; }
+button[data-pad-color="rose"] { background: linear-gradient(145deg, #fb7185, #e11d48) !important; color: #fff !important; border-color: #fda4af !important; }
+button[data-pad-color="purple"] { background: linear-gradient(145deg, #c084fc, #9333ea) !important; color: #fff !important; border-color: #d8b4fe !important; }
+button[data-pad-color="orange"] { background: linear-gradient(145deg, #fb923c, #ea580c) !important; color: #fff !important; border-color: #fdba74 !important; }
+button[data-pad-color="blue"] { background: linear-gradient(145deg, #60a5fa, #2563eb) !important; color: #fff !important; border-color: #93c5fd !important; }
+button[data-pad-color="pink"] { background: linear-gradient(145deg, #f472b6, #db2777) !important; color: #fff !important; border-color: #f9a8d4 !important; }
