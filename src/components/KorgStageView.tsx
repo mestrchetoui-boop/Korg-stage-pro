@@ -2923,12 +2923,12 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                         +
                       </button>
                     </div>
-              
+                  </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-neutral-300 font-bold">
-                        {isAr ? 'رقم البيرفورمانس (1 – 40):' : 'Performance Number (1 – 32):'}
+                        {isAr ? 'رقم البيرفورمانس (1 – 32):' : 'Performance Number (1 – 32):'}
                       </label>
                       <span dir="ltr" className="font-mono text-[11px] font-bold text-slate-400">
                         {keyboardMode === 'kronos'
@@ -2947,7 +2947,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                       <input
                         type="number"
                         min={1}
-                        max={40}
+                        max={32}
                         value={perfNum}
                         onChange={(e) => updatePerformanceFields(bankNum, clampPerfNumber(e.target.value, 1))}
                         className="flex-1 h-11 bg-[#0B1120] text-[#FFB703] font-mono font-black text-base text-center rounded-xl border border-[#1E293B] focus:outline-none focus:border-[#FFB703]"
@@ -3007,7 +3007,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                   </div>
                 </div>
               ) : (
-                  {(() => {
+                (() => {
                   const styleMode: 'pc_only' | 'bank_pc' =
                     editingPad.messageType === 'pc_only' ? 'pc_only' : 'bank_pc';
                   const safeMsb = clampMidi(editingPad.msb, 0);
@@ -3296,9 +3296,9 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     </div>
                   );
                 })()
-                  })
+              )}
 
-              
+              {editingPad.type === 'style' && (
                 <div>
                   <label className="text-neutral-300 block mb-1.5">
                     {isAr ? 'لون الزر:' : 'Button Color:'}
@@ -3316,8 +3316,8 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
                     ))}
                   </div>
                 </div>
-                      
-    
+              )}
+            </div>
 
             <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#1E293B]">
               <button
@@ -3350,10 +3350,10 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
               </div>
             </div>
 
-                </div>       
-      
-     ) :null} 
-
+          </div>
+        </div>
+        );
+      })()}
 
       {/* Live Stage Setlist Manager Modal */}
       {isSetlistModalOpen && (
@@ -3450,7 +3450,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           <span>{toast}</span>
         </div>
       )}
-            </div>
+
     </div>
   );
 };
