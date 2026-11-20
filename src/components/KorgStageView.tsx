@@ -3450,7 +3450,7 @@ export const KorgStageView: React.FC<KorgStageViewProps> = ({
           <span>{toast}</span>
         </div>
       )}
-
+            </div>
     </div>
   );
 };
